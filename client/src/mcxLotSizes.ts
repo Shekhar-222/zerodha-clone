@@ -9,6 +9,13 @@ const MCX_LOT_SIZES: Record<string, number> = {
   NATURALGAS: 1250,
   NATGASMINI: 250,
   COPPER: 2500,
+  GOLDTEN: 1,
+  GOLDM: 10,
+  GOLDGUINEA: 1,
+  GOLDPETAL: 1,
+  SILVERMIC: 1,
+  SILVERM: 5,
+  SILVER: 30,
 };
 
 export function mcxUnitMultiplier(exchange: string, name: string | null | undefined): number {

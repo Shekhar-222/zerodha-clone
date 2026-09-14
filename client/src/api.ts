@@ -160,6 +160,15 @@ export type Quote = {
   ohlc: { open: number; high: number; low: number; close: number };
 };
 
+export type Candle = {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+};
+
 export type OptionChainLeg = {
   instrument_token: number;
   tradingsymbol: string;
@@ -205,6 +214,11 @@ export const api = {
     bracket_target?: number;
   }) => request<Order>("/api/orders", { method: "POST", body: JSON.stringify(input) }),
   cancelOrder: (id: number) => request<Order>(`/api/orders/${id}`, { method: "DELETE" }),
+
+  getHistory: (token: number, interval: string, from: string, to: string) =>
+    request<Candle[]>(
+      `/api/instruments/history?token=${token}&interval=${interval}&from=${from}&to=${to}`
+    ),
 
   getOptionExpiries: (symbol: string) =>
     request<{ underlying: string; expiries: string[] }>(

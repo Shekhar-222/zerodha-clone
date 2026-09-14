@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { api, Order, Position, Holding, Funds, Profile } from "./api";
+import { api, Instrument, Order, Position, Holding, Funds, Profile } from "./api";
 import { useLiveData } from "./hooks/useLiveData";
 import { IndexTicker } from "./components/IndexTicker";
 import { HeaderNav, Tab } from "./components/HeaderNav";
 import { Watchlist } from "./components/Watchlist";
+import { ChartPanel } from "./components/ChartPanel";
 import { PositionsTable } from "./components/PositionsTable";
 import { HoldingsTable } from "./components/HoldingsTable";
 import { OrdersTable } from "./components/OrdersTable";
 import { FundsBar } from "./components/FundsBar";
 import { PnlSummary } from "./components/PnlSummary";
 import { TradeHistoryTable } from "./components/TradeHistoryTable";
+import { EmptyState } from "./components/EmptyState";
 
 const TAB_TITLES: Record<Tab, string> = {
   dashboard: "Dashboard",
+  chart: "Chart",
   orders: "Orders",
   holdings: "Holdings",
   positions: "Positions",
@@ -30,7 +33,13 @@ export default function App() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [funds, setFunds] = useState<Funds | null>(null);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
+  const [chartInstrument, setChartInstrument] = useState<Instrument | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  function openChart(instrument: Instrument) {
+    setChartInstrument(instrument);
+    setTab("chart");
+  }
 
   function refreshAll() {
     api.getOrders().then(setOrders).catch(console.error);
@@ -175,6 +184,7 @@ export default function App() {
             onOrderPlaced={refreshAll}
             searchInputRef={searchInputRef}
             onClose={() => setWatchlistOpen(false)}
+            onOpenChart={openChart}
           />
         </div>
 
@@ -202,6 +212,21 @@ export default function App() {
                   <div className="text-xs text-gray-500">Pending Orders</div>
                 </div>
               </div>
+            )}
+            {tab === "chart" && (
+              chartInstrument ? (
+                <ChartPanel
+                  instrument={chartInstrument}
+                  ltp={ltpByToken[chartInstrument.instrument_token]}
+                  onOrderPlaced={refreshAll}
+                />
+              ) : (
+                <EmptyState
+                  message="Click the chart icon on a watchlist row to view its chart here"
+                  ctaLabel="Open watchlist"
+                  onCta={focusSearch}
+                />
+              )
             )}
             {tab === "positions" && (
               <PositionsTable

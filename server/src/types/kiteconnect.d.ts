@@ -13,6 +13,24 @@ declare module "kiteconnect" {
     getLTP(instruments: string[]): Promise<Record<string, { instrument_token: number; last_price: number }>>;
     getProfile(): Promise<{ user_id: string; user_name: string; user_shortname: string; [key: string]: any }>;
     invalidateAccessToken(accessToken?: string): Promise<any>;
+    getHistoricalData(
+      instrumentToken: number,
+      interval: "minute" | "day" | "3minute" | "5minute" | "10minute" | "15minute" | "30minute" | "60minute",
+      fromDate: string,
+      toDate: string,
+      continuous?: boolean,
+      oi?: boolean
+    ): Promise<
+      Array<{
+        date: string;
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+        volume: number;
+        oi?: number;
+      }>
+    >;
     orderMargins(
       orders: Array<{
         exchange: string;

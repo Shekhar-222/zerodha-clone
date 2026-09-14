@@ -1,10 +1,11 @@
 import { Bell, LogOut, Menu, ShoppingCart } from "lucide-react";
 import { Profile } from "../api";
 
-export type Tab = "dashboard" | "orders" | "holdings" | "positions" | "funds" | "history";
+export type Tab = "dashboard" | "chart" | "orders" | "holdings" | "positions" | "funds" | "history";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
+  { id: "chart", label: "Chart" },
   { id: "orders", label: "Orders" },
   { id: "holdings", label: "Holdings" },
   { id: "positions", label: "Positions" },

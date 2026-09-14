@@ -1,5 +1,16 @@
 import { RefObject, useEffect, useRef, useState } from "react";
-import { ArrowDownUp, Check, ChevronDown, ChevronUp, GripVertical, Link2, Search, Trash2, X } from "lucide-react";
+import {
+  ArrowDownUp,
+  CandlestickChart,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  GripVertical,
+  Link2,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { api, Instrument, WatchlistItem } from "../api";
 import { OrderWindow } from "./OrderWindow";
 import { OptionChain } from "./OptionChain";
@@ -33,11 +44,13 @@ export function Watchlist({
   onOrderPlaced,
   searchInputRef,
   onClose,
+  onOpenChart,
 }: {
   ltpByToken: Record<number, number>;
   onOrderPlaced: () => void;
   searchInputRef?: RefObject<HTMLInputElement>;
   onClose?: () => void;
+  onOpenChart: (instrument: Instrument) => void;
 }) {
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [prevClose, setPrevClose] = useState<Record<number, number>>({});
@@ -356,6 +369,13 @@ export function Watchlist({
                   title="Sell"
                 >
                   S
+                </button>
+                <button
+                  onClick={() => onOpenChart(toInstrument(item))}
+                  className="flex h-7 w-8 items-center justify-center rounded border border-gray-200 text-gray-500 hover:bg-gray-50"
+                  title="Chart"
+                >
+                  <CandlestickChart size={14} />
                 </button>
                 <button
                   onClick={() => setChainFor({ instrument: toInstrument(item), ltp })}

@@ -79,7 +79,7 @@ export function PositionsTable({
   return (
     <>
       <div className="overflow-x-auto">
-      <table className="w-full min-w-[640px] text-[13px]">
+      <table className="w-full min-w-[640px] text-[15px]">
         <thead>
           <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
             <th className="w-8 py-2 font-normal">
@@ -121,7 +121,7 @@ export function PositionsTable({
                   />
                 </td>
                 <td className="py-2.5">
-                  <span className="rounded bg-purple-50 px-1.5 py-0.5 text-[11px] font-medium text-purple-600">
+                  <span className="rounded bg-purple-50 px-1.5 py-0.5 text-[12px] font-medium text-purple-600">
                     {p.product}
                   </span>
                 </td>
@@ -136,7 +136,7 @@ export function PositionsTable({
                 >
                   {exactQty}
                   {p.exchange === "MCX" && (
-                    <div className="text-[11px] font-normal text-gray-400">
+                    <div className="text-[12px] font-normal text-gray-400">
                       {p.quantity} lot{Math.abs(p.quantity) === 1 ? "" : "s"}
                     </div>
                   )}

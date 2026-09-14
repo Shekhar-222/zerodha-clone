@@ -221,9 +221,9 @@ export function Watchlist({
               }
             }}
             placeholder="Search eg: infy bse, nifty fut, index fund, et"
-            className="w-full rounded border border-gray-200 bg-white py-1.5 pl-8 pr-14 text-[13px] placeholder:text-gray-400 focus:border-accent focus:outline-none"
+            className="w-full rounded border border-gray-200 bg-white py-1.5 pl-8 pr-14 text-[15px] placeholder:text-gray-400 focus:border-accent focus:outline-none"
           />
-          <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 rounded border border-gray-200 px-1 text-[10px] text-gray-400 hidden sm:inline-block">
+          <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 rounded border border-gray-200 px-1 text-[11px] text-gray-400 hidden sm:inline-block">
             Ctrl + K
           </span>
 
@@ -236,7 +236,7 @@ export function Watchlist({
                   <div
                     key={r.instrument_token}
                     onClick={() => toggleSelected(r)}
-                    className={`flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-gray-50 ${
+                    className={`flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-[15px] hover:bg-gray-50 ${
                       isSelected ? "bg-accent/5" : ""
                     }`}
                   >
@@ -340,11 +340,11 @@ export function Watchlist({
                 <GripVertical size={13} />
               </span>
               <div className="min-w-0 flex-1">
-                <ContractLabel item={item} className={`truncate text-[13px] ${color}`} />
+                <ContractLabel item={item} className={`truncate text-[15px] ${color}`} />
               </div>
 
               {hasData ? (
-                <div className="flex items-center gap-2.5 text-[13px] tabular-nums">
+                <div className="flex items-center gap-2.5 text-[15px] tabular-nums">
                   <span className={`flex w-16 items-center justify-end gap-0.5 ${color}`}>
                     {positive ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                     {Math.abs(changePct).toFixed(2)}%
@@ -352,7 +352,7 @@ export function Watchlist({
                   <span className={`w-16 text-right font-medium ${color}`}>{ltp.toFixed(2)}</span>
                 </div>
               ) : (
-                <span className="w-[130px] text-right text-[13px] text-gray-400">—</span>
+                <span className="w-[130px] text-right text-[15px] text-gray-400">—</span>
               )}
 
               <div className="absolute inset-y-0 right-2 hidden items-center gap-1.5 bg-white pl-6 group-hover:flex">

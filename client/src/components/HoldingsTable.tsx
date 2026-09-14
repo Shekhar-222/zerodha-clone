@@ -16,7 +16,7 @@ export function HoldingsTable({
 
   return (
     <div className="overflow-x-auto">
-    <table className="w-full min-w-[480px] text-[13px]">
+    <table className="w-full min-w-[480px] text-[15px]">
       <thead>
         <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
           <th className="py-2 font-normal">Symbol</th>

@@ -81,7 +81,7 @@ export function OrdersTable({
   return (
     <div>
       <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] text-[13px]">
+      <table className="w-full min-w-[720px] text-[15px]">
         <thead>
           <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
             <th className="w-8 py-2 font-normal">
@@ -125,7 +125,7 @@ export function OrdersTable({
                 </td>
                 <td className="py-2.5">
                   <span
-                    className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                    className={`rounded px-1.5 py-0.5 text-[12px] font-medium ${
                       o.transaction_type === "BUY" ? "bg-link/10 text-link" : "bg-loss/10 text-loss"
                     }`}
                   >
@@ -136,12 +136,12 @@ export function OrdersTable({
                   <span className="font-medium text-gray-800">{formatContractLabel(o)}</span>{" "}
                   <span className="text-xs text-gray-400">{o.exchange}</span>
                   {(o.bracket_stoploss != null || o.bracket_target != null) && (
-                    <div className="text-[11px] text-gray-400">
+                    <div className="text-[12px] text-gray-400">
                       Bracket · SL {o.bracket_stoploss?.toFixed(2) ?? "—"} / Target {o.bracket_target?.toFixed(2) ?? "—"}
                     </div>
                   )}
                   {o.bracket_role && (
-                    <div className="text-[11px] text-gray-400">
+                    <div className="text-[12px] text-gray-400">
                       {o.bracket_role === "SL" ? "Bracket stoploss leg" : "Bracket target leg"}
                     </div>
                   )}
@@ -154,13 +154,13 @@ export function OrdersTable({
                 <td className="py-2.5 text-right tabular-nums">
                   {(o.filled_price ?? o.price ?? 0).toFixed(2)}
                   {(o.order_type === "SL" || o.order_type === "SL-M") && o.trigger_price != null && (
-                    <div className="text-[11px] font-normal text-gray-400">
+                    <div className="text-[12px] font-normal text-gray-400">
                       Stoploss @ {o.trigger_price.toFixed(2)}
                     </div>
                   )}
                 </td>
                 <td className="py-2.5">
-                  <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${STATUS_STYLE[o.status]}`}>
+                  <span className={`rounded px-1.5 py-0.5 text-[12px] font-medium ${STATUS_STYLE[o.status]}`}>
                     {o.status}
                   </span>
                 </td>

@@ -53,7 +53,7 @@ function LegCell({
     <span className="whitespace-nowrap">
       <span className="font-medium text-gray-800">{ltp !== undefined ? ltp.toFixed(2) : "—"}</span>
       {pct !== null && (
-        <span className={`ml-1.5 text-[11px] ${positive ? "text-gain" : "text-loss"}`}>
+        <span className={`ml-1.5 text-[12px] ${positive ? "text-gain" : "text-loss"}`}>
           {positive ? "+" : ""}
           {pct.toFixed(2)}%
         </span>
@@ -65,14 +65,14 @@ function LegCell({
     <span className="hidden items-center gap-1 group-hover:flex">
       <button
         onClick={onBuy}
-        className="flex h-6 w-6 items-center justify-center rounded bg-link text-[11px] font-semibold text-white hover:bg-blue-600"
+        className="flex h-6 w-6 items-center justify-center rounded bg-link text-[12px] font-semibold text-white hover:bg-blue-600"
         title="Buy"
       >
         B
       </button>
       <button
         onClick={onSell}
-        className="flex h-6 w-6 items-center justify-center rounded bg-loss text-[11px] font-semibold text-white hover:bg-red-600"
+        className="flex h-6 w-6 items-center justify-center rounded bg-loss text-[12px] font-semibold text-white hover:bg-red-600"
         title="Sell"
       >
         S
@@ -234,7 +234,7 @@ export function OptionChain({
           </div>
         )}
 
-        <div className="flex items-center justify-center gap-4 border-b border-gray-100 py-1.5 text-[11px] text-gray-500">
+        <div className="flex items-center justify-center gap-4 border-b border-gray-100 py-1.5 text-[12px] text-gray-500">
           <span className="flex items-center gap-1">
             <span className="h-2 w-2 rounded-sm bg-amber-50 border border-amber-200" /> ITM
           </span>
@@ -253,7 +253,7 @@ export function OptionChain({
           )}
 
           {!error && !loading && expiries.length > 0 && (
-            <table className="w-full table-fixed text-[12px]">
+            <table className="w-full table-fixed text-[13px]">
               <colgroup>
                 <col className="w-[42%]" />
                 <col className="w-[16%]" />

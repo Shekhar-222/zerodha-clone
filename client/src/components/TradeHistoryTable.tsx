@@ -20,7 +20,7 @@ export function TradeHistoryTable() {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] text-[13px]">
+      <table className="w-full min-w-[560px] text-[15px]">
         <thead>
           <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
             <th className="py-2 font-normal">Date &amp; Time</th>
@@ -46,7 +46,7 @@ export function TradeHistoryTable() {
               </td>
               <td className="py-2.5">
                 <span
-                  className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                  className={`rounded px-1.5 py-0.5 text-[12px] font-medium ${
                     t.transaction_type === "BUY" ? "bg-link/10 text-link" : "bg-loss/10 text-loss"
                   }`}
                 >

@@ -43,7 +43,7 @@ export function PnlSummary() {
       </div>
       <div className="divide-y divide-gray-100">
         {items.map((item, i) => (
-          <div key={i} className="flex items-center justify-between py-2 text-[13px]">
+          <div key={i} className="flex items-center justify-between py-2 text-[15px]">
             <div>
               <ContractLabel item={item} className="text-gray-800" />
               <span className="ml-2 text-xs text-gray-400">

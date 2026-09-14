@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+html {
+  /* Scales every rem-based Tailwind text/spacing utility app-wide (16px -> 18px base) —
+     the handful of fixed text-[Npx] classes are bumped individually alongside this, in the
+     same commit, so both sizing styles grow together instead of drifting apart. */
+  font-size: 112.5%;
+}
+
 body {
   @apply bg-[#f4f4f4] text-[#1a1a1a];
 }

@@ -135,7 +135,7 @@ export function PositionsTable({
                   }`}
                 >
                   {exactQty}
-                  {multiplier > 1 && (
+                  {p.exchange === "MCX" && (
                     <div className="text-[11px] font-normal text-gray-400">
                       {p.quantity} lot{Math.abs(p.quantity) === 1 ? "" : "s"}
                     </div>

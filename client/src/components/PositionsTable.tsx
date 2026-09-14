@@ -119,7 +119,9 @@ export function PositionsTable({
         <tbody>
           {positions.map((p) => {
             const ltp = ltpByToken[p.instrument_token] ?? p.ltp;
-            const pnl = (ltp - p.avg_price) * p.quantity * mcxUnitMultiplier(p.exchange, p.name);
+            const multiplier = mcxUnitMultiplier(p.exchange, p.name);
+            const pnl = (ltp - p.avg_price) * p.quantity * multiplier;
+            const exactQty = p.quantity * multiplier;
             const close = prevClose[p.instrument_token];
             const chgPct = close ? ((ltp - close) / close) * 100 : null;
             return (
@@ -146,7 +148,12 @@ export function PositionsTable({
                     p.quantity >= 0 ? "text-link" : "text-loss"
                   }`}
                 >
-                  {p.quantity}
+                  {exactQty}
+                  {multiplier > 1 && (
+                    <div className="text-[11px] font-normal text-gray-400">
+                      {p.quantity} lot{Math.abs(p.quantity) === 1 ? "" : "s"}
+                    </div>
+                  )}
                 </td>
                 <td className="py-2.5 text-right tabular-nums text-gray-600">{p.avg_price.toFixed(2)}</td>
                 <td className="py-2.5 text-right tabular-nums text-gray-800">{ltp.toFixed(2)}</td>

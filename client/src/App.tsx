@@ -75,6 +75,17 @@ export default function App() {
     }
   }
 
+  // Auto-login is the preferred path: the moment we know the user is logged out, try it
+  // automatically before ever showing the manual button, so a working setup never requires
+  // a click. Manual login stays underneath as the fallback for when it isn't configured or
+  // doesn't succeed.
+  useEffect(() => {
+    if (loggedIn === false && autoLoginStatus === "idle") {
+      tryAutoLogin();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedIn]);
+
   async function handleLogout() {
     if (!window.confirm("Log out of Kite? You'll need to log in again to resume live prices.")) return;
     try {
@@ -83,6 +94,7 @@ export default function App() {
       console.error(err);
     } finally {
       setProfile(null);
+      setAutoLoginStatus("idle");
       setLoggedIn(false);
     }
   }
@@ -102,26 +114,33 @@ export default function App() {
         <div className="w-full max-w-sm rounded-md border border-gray-200 bg-white p-6 text-center shadow-sm sm:p-10">
           <h1 className="mb-2 text-2xl font-semibold text-gray-800">Kite Paper</h1>
           <p className="mb-6 text-gray-500">Log in with your Zerodha Kite account to fetch live market data.</p>
+
+          {autoLoginStatus === "trying" && (
+            <div className="mb-5 flex items-center justify-center gap-2 text-sm text-gray-500">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-300 border-t-link" />
+              Trying auto-login…
+            </div>
+          )}
+          {autoLoginStatus === "failed" && (
+            <p className="mb-5 text-xs text-loss">
+              Auto-login failed or isn't configured — log in manually below.
+            </p>
+          )}
+
           <a
             href={api.loginUrl()}
             className="rounded bg-link px-4 py-2 font-medium text-white hover:bg-blue-600"
           >
             Login with Kite
           </a>
-          <div className="mt-3">
-            <button
-              onClick={tryAutoLogin}
-              disabled={autoLoginStatus === "trying"}
-              className="text-sm text-link hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {autoLoginStatus === "trying" ? "Trying auto-login…" : "Try auto-login"}
-            </button>
-            {autoLoginStatus === "failed" && (
-              <p className="mt-1 text-xs text-loss">
-                Auto-login failed or isn't configured — log in manually above.
-              </p>
-            )}
-          </div>
+
+          {autoLoginStatus === "failed" && (
+            <div className="mt-3">
+              <button onClick={tryAutoLogin} className="text-sm text-link hover:underline">
+                Retry auto-login
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );

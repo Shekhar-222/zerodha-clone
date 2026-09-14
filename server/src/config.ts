@@ -21,7 +21,9 @@ export const config = {
   // login page). Left unset, the app falls back to the normal manual /api/auth/login flow.
   kiteUserId: process.env.KITE_USER_ID,
   kitePassword: process.env.KITE_PASSWORD,
-  kitePin: process.env.KITE_PIN,
+  // The base32 TOTP secret (the long string shown under the QR code when 2FA was first set
+  // up on Kite) — NOT a 6-digit code, those expire every 30s and can't be stored statically.
+  kiteTotpSecret: process.env.KITE_TOTP_SECRET,
   virtualCapital: Number(process.env.VIRTUAL_CAPITAL ?? 2000000),
   dbPath: path.resolve(__dirname, "..", "data.sqlite"),
   defaultUserId: 1,

@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { kite } from "./kiteClient";
 import { config } from "../config";
+import { generateTotp, totpMsRemaining } from "./totp";
 
 // A persistent browser profile so Kite sees the same "device" on every auto-login run —
 // without it, each headless run looks like a brand-new device/location to Kite, which can
@@ -25,6 +26,19 @@ async function dumpDebugState(page: Page, label: string) {
     console.error(`[auto-login] debug state saved to ${DEBUG_DIR} (${label})`);
   } catch (err) {
     console.error("[auto-login] failed to save debug state", err);
+  }
+}
+
+// Clicking a submit button that immediately triggers a page navigation can make Playwright's
+// own post-click actionability re-check throw — the button element gets removed from the DOM
+// the instant the page navigates, and Playwright reports that as an error even though the
+// click itself already landed. Whether it actually worked is verified separately by the
+// caller (waiting for the next page state to appear), so a throw here is safe to ignore.
+async function clickTolerant(page: Page, selector: string) {
+  try {
+    await page.click(selector, { timeout: 10000 });
+  } catch (err: any) {
+    console.warn(`[auto-login] click(${selector}) raised — likely a benign navigation race:`, err.message);
   }
 }
 
@@ -52,8 +66,8 @@ export async function autoLogin(): Promise<boolean> {
 }
 
 async function runAutoLogin(): Promise<boolean> {
-  if (!config.kiteUserId || !config.kitePassword || !config.kitePin) {
-    console.warn("[auto-login] KITE_USER_ID / KITE_PASSWORD / KITE_PIN not set — skipping");
+  if (!config.kiteUserId || !config.kitePassword || !config.kiteTotpSecret) {
+    console.warn("[auto-login] KITE_USER_ID / KITE_PASSWORD / KITE_TOTP_SECRET not set — skipping");
     return false;
   }
 
@@ -62,6 +76,25 @@ async function runAutoLogin(): Promise<boolean> {
   let page: Page | undefined;
   try {
     page = context.pages()[0] ?? (await context.newPage());
+
+    // Capture the `login` result at the network layer — the actual HTTP request the browser
+    // makes for the final redirect — rather than by re-reading page.url() afterward. Our own
+    // frontend strips that query param off the URL (via history.replaceState) within
+    // milliseconds of landing, sometimes fast enough to beat even a navigation-event listener,
+    // so anything that inspects the DOM/URL after the fact is unreliable here.
+    let capturedLoginResult: string | null = null;
+    page.on("request", (req) => {
+      try {
+        const url = new URL(req.url());
+        if (url.origin === new URL(config.clientUrl).origin) {
+          const login = url.searchParams.get("login");
+          if (login) capturedLoginResult = login;
+        }
+      } catch {
+        // ignore malformed URLs
+      }
+    });
+
     await page.goto(kite.getLoginURL(), { waitUntil: "domcontentloaded", timeout: 30000 });
 
     // With the persistent profile, Kite often already remembers the user id from a previous
@@ -74,7 +107,7 @@ async function runAutoLogin(): Promise<boolean> {
       console.log("[auto-login] user id already remembered by this browser profile, skipping");
     }
     await page.fill("#password", config.kitePassword);
-    await page.click('button[type="submit"]');
+    await clickTolerant(page, 'button[type="submit"]');
 
     // The PIN/TOTP step replaces the password form entirely once credentials are accepted —
     // waiting for #password to be removed is a reliable signal step 2 has rendered, and is
@@ -86,22 +119,36 @@ async function runAutoLogin(): Promise<boolean> {
       return false;
     }
 
+    // A fresh code, generated as late as possible: if the current 30s window is about to
+    // roll over, wait it out first so Kite doesn't receive a code that expires in transit.
+    if (totpMsRemaining() < 4000) {
+      await page.waitForTimeout(totpMsRemaining() + 500);
+    }
+    const totpCode = generateTotp(config.kiteTotpSecret);
+
     const secondFactorInput = page
       .locator('input[type="password"], input[type="text"], input[type="tel"], input[type="number"]')
       .last();
-    await secondFactorInput.fill(config.kitePin);
-    await page.click('button[type="submit"]');
+    await secondFactorInput.fill(totpCode);
+    await clickTolerant(page, 'button[type="submit"]');
 
     // A successful second factor ends with Kite redirecting through our callback route and
-    // on to the frontend — landing there is the signal the session was established.
-    try {
-      await page.waitForURL((url) => url.origin === new URL(config.clientUrl).origin, { timeout: 20000 });
-    } catch {
+    // on to the frontend, carrying the result as a `login` query param — already being
+    // captured by the `request` listener registered above, at the network layer, the moment
+    // the browser makes that request. Poll for it rather than re-inspecting page.url() here:
+    // the frontend strips that query param off the URL within milliseconds of landing, fast
+    // enough to beat even a navigation-event-based check on a fully successful login.
+    const deadline = Date.now() + 20000;
+    while (capturedLoginResult === null && Date.now() < deadline) {
+      await page.waitForTimeout(200);
+    }
+
+    if (capturedLoginResult === null) {
       await dumpDebugState(page, "never redirected back to the app after second factor");
       return false;
     }
 
-    const ok = page.url().includes("login=success");
+    const ok = capturedLoginResult === "success";
     if (ok) {
       console.log("[auto-login] session established");
     } else {

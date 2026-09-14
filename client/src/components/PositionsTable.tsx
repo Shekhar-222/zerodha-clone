@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, Instrument, Position } from "../api";
 import { EmptyState } from "./EmptyState";
 import { OrderWindow } from "./OrderWindow";
 import { formatContractLabel } from "../formatContract";
 import { mcxUnitMultiplier } from "../mcxLotSizes";
+
+const FNO_TYPES = new Set(["FUT", "CE", "PE"]);
 
 function toInstrument(p: Position): Instrument {
   return {
@@ -31,25 +33,6 @@ export function PositionsTable({
 }) {
   const [exiting, setExiting] = useState<Position | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [prevClose, setPrevClose] = useState<Record<number, number>>({});
-
-  const tokenKey = positions.map((p) => p.instrument_token).join(",");
-
-  useEffect(() => {
-    if (positions.length === 0) return;
-    api
-      .getQuotes(positions.map((p) => p.instrument_token))
-      .then((quotes) => {
-        const next: Record<number, number> = {};
-        for (const p of positions) {
-          const q = quotes[p.instrument_token];
-          if (q) next[p.instrument_token] = q.ohlc.close;
-        }
-        setPrevClose(next);
-      })
-      .catch(console.error);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenKey]);
 
   if (positions.length === 0) {
     return (
@@ -91,6 +74,7 @@ export function PositionsTable({
     const ltp = ltpByToken[p.instrument_token] ?? p.ltp;
     return sum + (ltp - p.avg_price) * p.quantity * mcxUnitMultiplier(p.exchange, p.name);
   }, 0);
+  const totalMargin = positions.reduce((sum, p) => sum + (p.margin_blocked || 0), 0);
 
   return (
     <>
@@ -112,7 +96,8 @@ export function PositionsTable({
             <th className="py-2 font-normal text-right">Avg</th>
             <th className="py-2 font-normal text-right">LTP</th>
             <th className="py-2 font-normal text-right">P&L</th>
-            <th className="py-2 font-normal text-right">Chg</th>
+            <th className="py-2 font-normal text-right">Margin used</th>
+            <th className="py-2 font-normal text-right">P&L %</th>
             <th className="w-14 py-2 font-normal"></th>
           </tr>
         </thead>
@@ -122,8 +107,9 @@ export function PositionsTable({
             const multiplier = mcxUnitMultiplier(p.exchange, p.name);
             const pnl = (ltp - p.avg_price) * p.quantity * multiplier;
             const exactQty = p.quantity * multiplier;
-            const close = prevClose[p.instrument_token];
-            const chgPct = close ? ((ltp - close) / close) * 100 : null;
+            const isFno = FNO_TYPES.has(p.instrument_type ?? "");
+            const marginBase = isFno ? p.margin_blocked : Math.abs(p.avg_price * exactQty);
+            const pnlPct = marginBase > 0 ? (pnl / marginBase) * 100 : null;
             return (
               <tr key={p.id} className="group border-b border-gray-100 hover:bg-gray-50">
                 <td className="py-2.5">
@@ -160,12 +146,15 @@ export function PositionsTable({
                 <td className={`py-2.5 text-right tabular-nums font-medium ${pnl >= 0 ? "text-gain" : "text-loss"}`}>
                   {pnl.toFixed(2)}
                 </td>
+                <td className="py-2.5 text-right tabular-nums text-gray-600">
+                  {isFno ? `₹${p.margin_blocked.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}
+                </td>
                 <td
-                  className={`py-2.5 text-right tabular-nums ${
-                    chgPct === null ? "text-gray-400" : chgPct >= 0 ? "text-gain" : "text-loss"
+                  className={`py-2.5 text-right tabular-nums font-medium ${
+                    pnlPct === null ? "text-gray-400" : pnlPct >= 0 ? "text-gain" : "text-loss"
                   }`}
                 >
-                  {chgPct === null ? "—" : `${chgPct.toFixed(2)}%`}
+                  {pnlPct === null ? "—" : `${pnlPct.toFixed(2)}%`}
                 </td>
                 <td className="py-2.5 text-right opacity-0 transition-opacity group-hover:opacity-100">
                   <button
@@ -186,6 +175,9 @@ export function PositionsTable({
             </td>
             <td className={`py-2.5 text-right tabular-nums font-medium ${totalPnl >= 0 ? "text-gain" : "text-loss"}`}>
               {totalPnl.toFixed(2)}
+            </td>
+            <td className="py-2.5 text-right tabular-nums font-medium text-gray-600">
+              {totalMargin > 0 ? `₹${totalMargin.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}
             </td>
             <td colSpan={2}></td>
           </tr>

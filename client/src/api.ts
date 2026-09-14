@@ -86,6 +86,7 @@ export type Position = {
   quantity: number;
   avg_price: number;
   realized_pnl: number;
+  margin_blocked: number;
   ltp: number;
   unrealized_pnl: number;
   name?: string | null;

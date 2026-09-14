@@ -3,6 +3,7 @@ import { api, Instrument, Position } from "../api";
 import { EmptyState } from "./EmptyState";
 import { OrderWindow } from "./OrderWindow";
 import { formatContractLabel } from "../formatContract";
+import { mcxUnitMultiplier } from "../mcxLotSizes";
 
 function toInstrument(p: Position): Instrument {
   return {
@@ -88,7 +89,7 @@ export function PositionsTable({
 
   const totalPnl = positions.reduce((sum, p) => {
     const ltp = ltpByToken[p.instrument_token] ?? p.ltp;
-    return sum + (ltp - p.avg_price) * p.quantity;
+    return sum + (ltp - p.avg_price) * p.quantity * mcxUnitMultiplier(p.exchange, p.name);
   }, 0);
 
   return (
@@ -118,7 +119,7 @@ export function PositionsTable({
         <tbody>
           {positions.map((p) => {
             const ltp = ltpByToken[p.instrument_token] ?? p.ltp;
-            const pnl = (ltp - p.avg_price) * p.quantity;
+            const pnl = (ltp - p.avg_price) * p.quantity * mcxUnitMultiplier(p.exchange, p.name);
             const close = prevClose[p.instrument_token];
             const chgPct = close ? ((ltp - close) / close) * 100 : null;
             return (

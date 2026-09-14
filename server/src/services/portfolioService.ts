@@ -1,0 +1,404 @@
+import { db } from "../db/db";
+import { config } from "../config";
+import { getCachedLtp } from "../kite/ticker";
+
+export type PositionRow = {
+  id: number;
+  user_id: number;
+  tradingsymbol: string;
+  exchange: string;
+  instrument_token: number;
+  product: string;
+  quantity: number;
+  avg_price: number;
+  realized_pnl: number;
+  margin_blocked: number;
+  updated_at: string;
+  name: string | null;
+  instrument_type: string | null;
+  lot_size: number | null;
+  expiry: string | null;
+  strike: number | null;
+};
+
+export type HoldingRow = {
+  id: number;
+  user_id: number;
+  tradingsymbol: string;
+  exchange: string;
+  instrument_token: number;
+  quantity: number;
+  avg_price: number;
+  instrument_type: string | null;
+  lot_size: number | null;
+};
+
+export function getPositions(userId: number = config.defaultUserId) {
+  const rows = db
+    .prepare(
+      `SELECT p.*, i.name, i.instrument_type, i.lot_size, i.expiry, i.strike
+       FROM positions p
+       LEFT JOIN instruments i ON i.instrument_token = p.instrument_token
+       WHERE p.user_id = ? AND p.quantity != 0`
+    )
+    .all(userId) as PositionRow[];
+
+  return rows.map((row) => {
+    const ltp = getCachedLtp(row.instrument_token) ?? row.avg_price;
+    const unrealized_pnl = (ltp - row.avg_price) * row.quantity;
+    return { ...row, ltp, unrealized_pnl };
+  });
+}
+
+export function getHoldings(userId: number = config.defaultUserId) {
+  const rows = db
+    .prepare(
+      `SELECT h.*, i.instrument_type, i.lot_size
+       FROM holdings h
+       LEFT JOIN instruments i ON i.instrument_token = h.instrument_token
+       WHERE h.user_id = ? AND h.quantity != 0`
+    )
+    .all(userId) as HoldingRow[];
+
+  return rows.map((row) => {
+    const ltp = getCachedLtp(row.instrument_token) ?? row.avg_price;
+    const unrealized_pnl = (ltp - row.avg_price) * row.quantity;
+    return { ...row, ltp, unrealized_pnl };
+  });
+}
+
+function upsertPosition(
+  userId: number,
+  tradingsymbol: string,
+  exchange: string,
+  instrumentToken: number,
+  product: string,
+  transactionType: "BUY" | "SELL",
+  tradeQty: number,
+  fillPrice: number
+): { quantity: number; realizedPnlDelta: number } {
+  const existing = db
+    .prepare(
+      "SELECT * FROM positions WHERE user_id = ? AND instrument_token = ? AND product = ?"
+    )
+    .get(userId, instrumentToken, product) as PositionRow | undefined;
+
+  const current = existing ?? {
+    quantity: 0,
+    avg_price: 0,
+    realized_pnl: 0,
+  };
+
+  const { quantity, avg_price, realized_pnl, realized_pnl_delta } = applyFill(
+    current.quantity,
+    current.avg_price,
+    current.realized_pnl,
+    transactionType,
+    tradeQty,
+    fillPrice
+  );
+
+  db.prepare(
+    `INSERT INTO positions (user_id, tradingsymbol, exchange, instrument_token, product, quantity, avg_price, realized_pnl, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(user_id, instrument_token, product) DO UPDATE SET
+       quantity = excluded.quantity,
+       avg_price = excluded.avg_price,
+       realized_pnl = excluded.realized_pnl,
+       updated_at = datetime('now')`
+  ).run(userId, tradingsymbol, exchange, instrumentToken, product, quantity, avg_price, realized_pnl);
+
+  return { quantity, realizedPnlDelta: realized_pnl_delta };
+}
+
+function upsertHolding(
+  userId: number,
+  tradingsymbol: string,
+  exchange: string,
+  instrumentToken: number,
+  transactionType: "BUY" | "SELL",
+  tradeQty: number,
+  fillPrice: number
+) {
+  const existing = db
+    .prepare("SELECT * FROM holdings WHERE user_id = ? AND instrument_token = ?")
+    .get(userId, instrumentToken) as HoldingRow | undefined;
+
+  const current = existing ?? { quantity: 0, avg_price: 0 };
+  const { quantity, avg_price } = applyFill(
+    current.quantity,
+    current.avg_price,
+    0,
+    transactionType,
+    tradeQty,
+    fillPrice
+  );
+
+  db.prepare(
+    `INSERT INTO holdings (user_id, tradingsymbol, exchange, instrument_token, quantity, avg_price)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, instrument_token) DO UPDATE SET
+       quantity = excluded.quantity,
+       avg_price = excluded.avg_price`
+  ).run(userId, tradingsymbol, exchange, instrumentToken, quantity, avg_price);
+}
+
+/**
+ * Weighted-average position math on a signed-quantity position (positive = long, negative = short).
+ * Handles adding to a position, partial/full closes, and direction flips in one pass.
+ */
+export function applyFill(
+  quantity: number,
+  avgPrice: number,
+  realizedPnl: number,
+  transactionType: "BUY" | "SELL",
+  tradeQty: number,
+  fillPrice: number
+): { quantity: number; avg_price: number; realized_pnl: number; realized_pnl_delta: number; closingQty: number } {
+  const signedTradeQty = transactionType === "BUY" ? tradeQty : -tradeQty;
+
+  if (quantity === 0 || Math.sign(quantity) === Math.sign(signedTradeQty)) {
+    const newQuantity = quantity + signedTradeQty;
+    const newAvgPrice =
+      (Math.abs(quantity) * avgPrice + tradeQty * fillPrice) / Math.abs(newQuantity);
+    return {
+      quantity: newQuantity,
+      avg_price: newAvgPrice,
+      realized_pnl: realizedPnl,
+      realized_pnl_delta: 0,
+      closingQty: 0,
+    };
+  }
+
+  const closingQty = Math.min(Math.abs(signedTradeQty), Math.abs(quantity));
+  const pnlPerUnit = quantity > 0 ? fillPrice - avgPrice : avgPrice - fillPrice;
+  const pnlDelta = pnlPerUnit * closingQty;
+  const newRealizedPnl = realizedPnl + pnlDelta;
+
+  const newQuantity = quantity + signedTradeQty;
+  const remainingTradeQty = Math.abs(signedTradeQty) - closingQty;
+
+  let newAvgPrice = avgPrice;
+  if (newQuantity === 0) {
+    newAvgPrice = 0;
+  } else if (remainingTradeQty > 0) {
+    newAvgPrice = fillPrice;
+  }
+
+  return {
+    quantity: newQuantity,
+    avg_price: newAvgPrice,
+    realized_pnl: newRealizedPnl,
+    realized_pnl_delta: pnlDelta,
+    closingQty,
+  };
+}
+
+export function recordFillInPortfolio(params: {
+  userId: number;
+  tradingsymbol: string;
+  exchange: string;
+  instrumentToken: number;
+  product: "MIS" | "CNC" | "NRML";
+  transactionType: "BUY" | "SELL";
+  quantity: number;
+  fillPrice: number;
+}): { quantity: number; realizedPnlDelta: number } {
+  const { userId, tradingsymbol, exchange, instrumentToken, product, transactionType, quantity, fillPrice } =
+    params;
+
+  const result = upsertPosition(
+    userId,
+    tradingsymbol,
+    exchange,
+    instrumentToken,
+    product,
+    transactionType,
+    quantity,
+    fillPrice
+  );
+
+  if (product === "CNC") {
+    upsertHolding(userId, tradingsymbol, exchange, instrumentToken, transactionType, quantity, fillPrice);
+  }
+
+  return result;
+}
+
+export type PnlSummaryItem = {
+  tradingsymbol: string;
+  name: string | null;
+  instrument_type: string | null;
+  expiry: string | null;
+  strike: number | null;
+  product: string;
+  status: "closed" | "open";
+  executed_at: string | null;
+  quantity: number;
+  pnl: number;
+  charges: number;
+  net_pnl: number;
+};
+
+/**
+ * Per-trade P&L, not per-symbol: if you round-tripped the same stock three times today,
+ * you get three separate rows (one per closing trade), each with its own realized P&L and
+ * that trade's own charges — not one number that hides how each individual trade actually
+ * went. Replays trade_history in order through the same weighted-average logic positions
+ * use, so a closing trade's realized_pnl_delta is exactly what that trade contributed.
+ * Currently open positions get one row each for live unrealized P&L (nothing to split up
+ * yet since they haven't been closed).
+ */
+export function getPnlSummary(userId: number = config.defaultUserId): PnlSummaryItem[] {
+  const trades = db
+    .prepare(
+      `SELECT th.tradingsymbol, th.product, th.transaction_type, th.quantity, th.price, th.charges, th.executed_at,
+              i.name, i.instrument_type, i.expiry, i.strike
+       FROM trade_history th
+       LEFT JOIN instruments i ON i.instrument_token = th.instrument_token
+       WHERE th.user_id = ? ORDER BY th.executed_at ASC, th.id ASC`
+    )
+    .all(userId) as {
+    tradingsymbol: string;
+    product: string;
+    transaction_type: "BUY" | "SELL";
+    quantity: number;
+    price: number;
+    charges: number;
+    executed_at: string;
+    name: string | null;
+    instrument_type: string | null;
+    expiry: string | null;
+    strike: number | null;
+  }[];
+
+  const state = new Map<string, { quantity: number; avg_price: number; realized_pnl: number }>();
+  const closedRows: PnlSummaryItem[] = [];
+
+  for (const trade of trades) {
+    const key = `${trade.tradingsymbol}::${trade.product}`;
+    const current = state.get(key) ?? { quantity: 0, avg_price: 0, realized_pnl: 0 };
+    const result = applyFill(
+      current.quantity,
+      current.avg_price,
+      current.realized_pnl,
+      trade.transaction_type,
+      trade.quantity,
+      trade.price
+    );
+    state.set(key, { quantity: result.quantity, avg_price: result.avg_price, realized_pnl: result.realized_pnl });
+
+    // Only trades that actually closed some existing exposure count as a P&L event — a pure
+    // opening trade has real charges too, but no P&L yet, so it shouldn't show up here as
+    // one. A closing trade at an unchanged price (zero gross P&L) still counts, since it
+    // still cost real charges that shouldn't silently disappear.
+    if (result.closingQty > 0) {
+      closedRows.push({
+        tradingsymbol: trade.tradingsymbol,
+        name: trade.name,
+        instrument_type: trade.instrument_type,
+        expiry: trade.expiry,
+        strike: trade.strike,
+        product: trade.product,
+        status: "closed",
+        executed_at: trade.executed_at,
+        quantity: trade.quantity,
+        pnl: result.realized_pnl_delta,
+        charges: trade.charges,
+        net_pnl: result.realized_pnl_delta - trade.charges,
+      });
+    }
+  }
+
+  const openRows = getPositions(userId)
+    .filter((p) => p.quantity !== 0)
+    .map((p): PnlSummaryItem => ({
+      tradingsymbol: p.tradingsymbol,
+      name: p.name,
+      instrument_type: p.instrument_type,
+      expiry: p.expiry,
+      strike: p.strike,
+      product: p.product,
+      status: "open",
+      executed_at: null,
+      quantity: p.quantity,
+      pnl: p.unrealized_pnl,
+      charges: 0,
+      net_pnl: p.unrealized_pnl,
+    }));
+
+  return [
+    ...openRows.sort((a, b) => b.pnl - a.pnl),
+    ...closedRows.sort((a, b) => (b.executed_at ?? "").localeCompare(a.executed_at ?? "")),
+  ];
+}
+
+export function getHoldingQuantity(instrumentToken: number, userId: number = config.defaultUserId): number {
+  const row = db
+    .prepare("SELECT quantity FROM holdings WHERE user_id = ? AND instrument_token = ?")
+    .get(userId, instrumentToken) as { quantity: number } | undefined;
+  return row?.quantity ?? 0;
+}
+
+export function getPositionMarginBlocked(
+  instrumentToken: number,
+  product: string,
+  userId: number = config.defaultUserId
+): number {
+  const row = db
+    .prepare("SELECT margin_blocked FROM positions WHERE user_id = ? AND instrument_token = ? AND product = ?")
+    .get(userId, instrumentToken, product) as { margin_blocked: number } | undefined;
+  return row?.margin_blocked ?? 0;
+}
+
+export function getPositionQuantity(
+  instrumentToken: number,
+  product: string,
+  userId: number = config.defaultUserId
+): number {
+  const row = db
+    .prepare("SELECT quantity FROM positions WHERE user_id = ? AND instrument_token = ? AND product = ?")
+    .get(userId, instrumentToken, product) as { quantity: number } | undefined;
+  return row?.quantity ?? 0;
+}
+
+export function setPositionMargin(
+  instrumentToken: number,
+  product: string,
+  marginBlocked: number,
+  userId: number = config.defaultUserId
+) {
+  db.prepare(
+    "UPDATE positions SET margin_blocked = ? WHERE user_id = ? AND instrument_token = ? AND product = ?"
+  ).run(marginBlocked, userId, instrumentToken, product);
+}
+
+export function getTotalMarginBlocked(userId: number = config.defaultUserId): number {
+  const row = db
+    .prepare("SELECT COALESCE(SUM(margin_blocked), 0) as total FROM positions WHERE user_id = ? AND quantity != 0")
+    .get(userId) as { total: number };
+  return row.total;
+}
+
+/**
+ * Real brokers mark F&O positions to market continuously, so a running loss eats into your
+ * usable margin well before you close the position — not just at settlement. Equity is left
+ * out here since delivery/MIS equity already debits the full cash amount at trade time, so
+ * an unrealized equity loss is already reflected in "less cash + a less valuable holding"
+ * rather than something that should further reduce available margin.
+ */
+export function getTotalFnoUnrealizedPnl(userId: number = config.defaultUserId): number {
+  const rows = db
+    .prepare(
+      `SELECT p.instrument_token, p.quantity, p.avg_price
+       FROM positions p
+       JOIN instruments i ON i.instrument_token = p.instrument_token
+       WHERE p.user_id = ? AND p.quantity != 0 AND i.instrument_type IN ('FUT','CE','PE')`
+    )
+    .all(userId) as { instrument_token: number; quantity: number; avg_price: number }[];
+
+  return rows.reduce((sum, row) => {
+    const ltp = getCachedLtp(row.instrument_token) ?? row.avg_price;
+    return sum + (ltp - row.avg_price) * row.quantity;
+  }, 0);
+}

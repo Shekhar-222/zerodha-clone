@@ -7,3 +7,4 @@ dist/
 *.sqlite-shm
 .kite-browser-profile/
 .auto-login-debug/
+*.pem

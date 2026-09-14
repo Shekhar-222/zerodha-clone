@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { createChart, CandlestickSeries, HistogramSeries, IChartApi, ISeriesApi, UTCTimestamp } from "lightweight-charts";
+import {
+  createChart,
+  CandlestickSeries,
+  HistogramSeries,
+  IChartApi,
+  ISeriesApi,
+  TickMarkType,
+  UTCTimestamp,
+} from "lightweight-charts";
 import { api, Candle, Instrument } from "../api";
 import { formatContractLabel } from "../formatContract";
 import { OrderWindow } from "./OrderWindow";
@@ -7,21 +15,82 @@ import { OrderWindow } from "./OrderWindow";
 const GAIN = "#00a862";
 const LOSS = "#eb5b3c";
 
-// The full timeframe list — add a new one here (must be a value Kite's historical API
-// accepts: minute/3minute/5minute/10minute/15minute/30minute/60minute/day) plus how far back
-// to load for it, and it shows up as a new button automatically. lookbackDays is how much
-// history to pull for that candle size — Kite's API rejects overly long ranges for
-// fine-grained intervals, so finer candles get a shorter window.
-const TIMEFRAMES = [
-  { value: "minute", label: "1m", lookbackDays: 5 },
-  { value: "3minute", label: "3m", lookbackDays: 15 },
-  { value: "5minute", label: "5m", lookbackDays: 30 },
-  { value: "10minute", label: "10m", lookbackDays: 60 },
-  { value: "15minute", label: "15m", lookbackDays: 90 },
-  { value: "30minute", label: "30m", lookbackDays: 120 },
-  { value: "60minute", label: "1h", lookbackDays: 180 },
-  { value: "day", label: "1D", lookbackDays: 365 },
+// Kite's candle timestamps are real UTC instants — left to the browser's own formatting,
+// they'd render in whichever timezone the viewer's machine happens to be set to. This app is
+// Indian-market-only, so every time label on the chart (axis ticks and the crosshair) is
+// force-formatted in IST regardless of where it's actually being viewed from.
+const IST_TIME_ZONE = "Asia/Kolkata";
+
+// Day/week/month candles carry no meaningful time-of-day (Kite dates them at midnight IST),
+// so showing "00:00" next to them is just noise — those timeframes get date-only labels,
+// while genuinely intraday ones keep showing hour:minute.
+function istTickMarkFormatter(isIntraday: boolean) {
+  return (time: UTCTimestamp, tickMarkType: TickMarkType): string => {
+    const date = new Date((time as unknown as number) * 1000);
+    switch (tickMarkType) {
+      case TickMarkType.Year:
+        return date.toLocaleString("en-IN", { timeZone: IST_TIME_ZONE, year: "numeric" });
+      case TickMarkType.Month:
+        return date.toLocaleString("en-IN", { timeZone: IST_TIME_ZONE, month: "short", year: "2-digit" });
+      case TickMarkType.DayOfMonth:
+        return date.toLocaleString("en-IN", { timeZone: IST_TIME_ZONE, day: "2-digit", month: "short" });
+      default:
+        return isIntraday
+          ? date.toLocaleString("en-IN", {
+              timeZone: IST_TIME_ZONE,
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            })
+          : date.toLocaleString("en-IN", { timeZone: IST_TIME_ZONE, day: "2-digit", month: "short" });
+    }
+  };
+}
+
+function istCrosshairFormatter(isIntraday: boolean) {
+  return (time: UTCTimestamp): string => {
+    const date = new Date((time as unknown as number) * 1000);
+    const base: Intl.DateTimeFormatOptions = {
+      timeZone: IST_TIME_ZONE,
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    };
+    if (!isIntraday) return date.toLocaleString("en-IN", base);
+    return (
+      date.toLocaleString("en-IN", { ...base, hour: "2-digit", minute: "2-digit", hour12: false }) + " IST"
+    );
+  };
+}
+
+// The full timeframe list — add a new one here and it shows up as a new button
+// automatically. `kiteInterval` is what actually gets requested from Kite's historical API
+// (minute/3minute/5minute/10minute/15minute/30minute/60minute/day — Kite has no native
+// week/month candle, so those two request daily data and get grouped client-side instead,
+// via `resample`). lookbackDays is how much history to pull — Kite's API rejects overly long
+// ranges for fine-grained intervals, so finer candles get a shorter window.
+const TIMEFRAMES: {
+  value: string;
+  label: string;
+  kiteInterval: string;
+  lookbackDays: number;
+  resample?: "week" | "month";
+}[] = [
+  { value: "minute", label: "1m", kiteInterval: "minute", lookbackDays: 5 },
+  { value: "3minute", label: "3m", kiteInterval: "3minute", lookbackDays: 15 },
+  { value: "5minute", label: "5m", kiteInterval: "5minute", lookbackDays: 30 },
+  { value: "10minute", label: "10m", kiteInterval: "10minute", lookbackDays: 60 },
+  { value: "15minute", label: "15m", kiteInterval: "15minute", lookbackDays: 90 },
+  { value: "30minute", label: "30m", kiteInterval: "30minute", lookbackDays: 120 },
+  { value: "60minute", label: "1h", kiteInterval: "60minute", lookbackDays: 180 },
+  { value: "day", label: "1D", kiteInterval: "day", lookbackDays: 365 },
+  { value: "week", label: "1W", kiteInterval: "day", lookbackDays: 365 * 2, resample: "week" },
+  { value: "month", label: "1M", kiteInterval: "day", lookbackDays: 365 * 5, resample: "month" },
 ];
+
+const INTRADAY_VALUES = new Set(
+  TIMEFRAMES.filter((t) => !t.resample && t.kiteInterval !== "day").map((t) => t.value)
+);
 
 function toDateParam(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -33,6 +102,39 @@ function dateRangeFor(interval: string): { from: string; to: string } {
   const from = new Date();
   from.setDate(from.getDate() - lookbackDays);
   return { from: toDateParam(from), to: toDateParam(to) };
+}
+
+// Groups daily candles into week (Monday-start) or month buckets — Kite has no native
+// weekly/monthly candle, so these are built from daily bars: open from the first day in the
+// bucket, close from the last, high/low across the whole bucket, volume summed.
+function resampleDaily(candles: Candle[], groupBy: "week" | "month"): Candle[] {
+  const groups = new Map<string, Candle[]>();
+  for (const c of candles) {
+    const d = new Date(c.date);
+    let key: string;
+    if (groupBy === "month") {
+      key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
+    } else {
+      const dayOfWeek = d.getUTCDay(); // 0=Sun..6=Sat
+      const daysSinceMonday = (dayOfWeek + 6) % 7;
+      const monday = new Date(d);
+      monday.setUTCDate(d.getUTCDate() - daysSinceMonday);
+      key = monday.toISOString().slice(0, 10);
+    }
+    const group = groups.get(key);
+    if (group) group.push(c);
+    else groups.set(key, [c]);
+  }
+  return Array.from(groups.values())
+    .map((group) => ({
+      date: group[0].date,
+      open: group[0].open,
+      high: Math.max(...group.map((g) => g.high)),
+      low: Math.min(...group.map((g) => g.low)),
+      close: group[group.length - 1].close,
+      volume: group.reduce((sum, g) => sum + g.volume, 0),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** Plain, embeddable candlestick chart — sits inline in a tab's content card, the same way
@@ -63,7 +165,12 @@ export function ChartPanel({
     const chart = createChart(containerRef.current, {
       layout: { background: { color: "#ffffff" }, textColor: "#5a5a5a" },
       grid: { vertLines: { color: "#f1f1f1" }, horzLines: { color: "#f1f1f1" } },
-      timeScale: { timeVisible: true, secondsVisible: false },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+        tickMarkFormatter: istTickMarkFormatter(INTRADAY_VALUES.has(candleInterval)),
+      },
+      localization: { timeFormatter: istCrosshairFormatter(INTRADAY_VALUES.has(candleInterval)) },
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight,
     });
@@ -102,14 +209,25 @@ export function ChartPanel({
   }, [instrument.instrument_token]);
 
   useEffect(() => {
+    if (!chartRef.current) return;
+    const isIntraday = INTRADAY_VALUES.has(candleInterval);
+    chartRef.current.applyOptions({
+      timeScale: { tickMarkFormatter: istTickMarkFormatter(isIntraday) },
+      localization: { timeFormatter: istCrosshairFormatter(isIntraday) },
+    });
+  }, [candleInterval]);
+
+  useEffect(() => {
     setLoading(true);
     setError(null);
+    const timeframe = TIMEFRAMES.find((t) => t.value === candleInterval) ?? TIMEFRAMES[7];
     const { from, to } = dateRangeFor(candleInterval);
 
     api
-      .getHistory(instrument.instrument_token, candleInterval, from, to)
-      .then((candles) => {
+      .getHistory(instrument.instrument_token, timeframe.kiteInterval, from, to)
+      .then((rawCandles) => {
         if (!candleSeriesRef.current || !chartRef.current) return;
+        const candles = timeframe.resample ? resampleDaily(rawCandles, timeframe.resample) : rawCandles;
         const data = candles.map((c) => ({
           time: (new Date(c.date).getTime() / 1000) as UTCTimestamp,
           open: c.open,

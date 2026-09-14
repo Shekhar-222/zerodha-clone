@@ -2,6 +2,21 @@ import { useEffect, useState } from "react";
 import { api, PnlSummaryItem } from "../api";
 import { ContractLabel } from "./ContractLabel";
 
+// NFO F&O quantity is real units (e.g. 500 shares = 1 lot of RELIANCE) — divide by lot_size
+// to show lots. MCX quantity already IS a lot count (Kite's order/margin API treats it that
+// way, even though its own lot_size field unhelpfully reports 1 there) — showing it as-is,
+// just labelled "lot(s)", is correct; dividing it again would be wrong.
+function formatQty(item: PnlSummaryItem): string {
+  if (item.exchange === "MCX") {
+    return `${item.quantity} lot${item.quantity === 1 ? "" : "s"}`;
+  }
+  if (item.lot_size && item.lot_size > 1) {
+    const lots = item.quantity / item.lot_size;
+    return `${lots} lot${lots === 1 ? "" : "s"}`;
+  }
+  return `${item.quantity}`;
+}
+
 export function PnlSummary() {
   const [items, setItems] = useState<PnlSummaryItem[] | null>(null);
 
@@ -32,7 +47,7 @@ export function PnlSummary() {
             <div>
               <ContractLabel item={item} className="text-gray-800" />
               <span className="ml-2 text-xs text-gray-400">
-                {item.status === "open" ? `${item.quantity} open` : `${item.quantity} · ${item.product}`}
+                {item.status === "open" ? `${formatQty(item)} open` : `${formatQty(item)} · ${item.product}`}
                 {item.executed_at &&
                   ` · ${new Date(item.executed_at + "Z").toLocaleString("en-IN", {
                     day: "2-digit",

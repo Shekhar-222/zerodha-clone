@@ -1,6 +1,7 @@
 import { db } from "../db/db";
 import { config } from "../config";
 import { getCachedLtp } from "../kite/ticker";
+import { mcxUnitMultiplier } from "./mcxLotSizes";
 
 export type PositionRow = {
   id: number;
@@ -45,7 +46,7 @@ export function getPositions(userId: number = config.defaultUserId) {
 
   return rows.map((row) => {
     const ltp = getCachedLtp(row.instrument_token) ?? row.avg_price;
-    const unrealized_pnl = (ltp - row.avg_price) * row.quantity;
+    const unrealized_pnl = (ltp - row.avg_price) * row.quantity * mcxUnitMultiplier(row.exchange, row.name);
     return { ...row, ltp, unrealized_pnl };
   });
 }
@@ -75,7 +76,8 @@ function upsertPosition(
   product: string,
   transactionType: "BUY" | "SELL",
   tradeQty: number,
-  fillPrice: number
+  fillPrice: number,
+  name: string | null
 ): { quantity: number; realizedPnlDelta: number } {
   const existing = db
     .prepare(
@@ -95,7 +97,8 @@ function upsertPosition(
     current.realized_pnl,
     transactionType,
     tradeQty,
-    fillPrice
+    fillPrice,
+    mcxUnitMultiplier(exchange, name)
   );
 
   db.prepare(
@@ -153,7 +156,8 @@ export function applyFill(
   realizedPnl: number,
   transactionType: "BUY" | "SELL",
   tradeQty: number,
-  fillPrice: number
+  fillPrice: number,
+  unitMultiplier: number = 1
 ): { quantity: number; avg_price: number; realized_pnl: number; realized_pnl_delta: number; closingQty: number } {
   const signedTradeQty = transactionType === "BUY" ? tradeQty : -tradeQty;
 
@@ -172,7 +176,7 @@ export function applyFill(
 
   const closingQty = Math.min(Math.abs(signedTradeQty), Math.abs(quantity));
   const pnlPerUnit = quantity > 0 ? fillPrice - avgPrice : avgPrice - fillPrice;
-  const pnlDelta = pnlPerUnit * closingQty;
+  const pnlDelta = pnlPerUnit * closingQty * unitMultiplier;
   const newRealizedPnl = realizedPnl + pnlDelta;
 
   const newQuantity = quantity + signedTradeQty;
@@ -203,8 +207,9 @@ export function recordFillInPortfolio(params: {
   transactionType: "BUY" | "SELL";
   quantity: number;
   fillPrice: number;
+  name?: string | null;
 }): { quantity: number; realizedPnlDelta: number } {
-  const { userId, tradingsymbol, exchange, instrumentToken, product, transactionType, quantity, fillPrice } =
+  const { userId, tradingsymbol, exchange, instrumentToken, product, transactionType, quantity, fillPrice, name } =
     params;
 
   const result = upsertPosition(
@@ -215,7 +220,8 @@ export function recordFillInPortfolio(params: {
     product,
     transactionType,
     quantity,
-    fillPrice
+    fillPrice,
+    name ?? null
   );
 
   if (product === "CNC") {
@@ -227,6 +233,7 @@ export function recordFillInPortfolio(params: {
 
 export type PnlSummaryItem = {
   tradingsymbol: string;
+  exchange: string;
   name: string | null;
   instrument_type: string | null;
   expiry: string | null;
@@ -235,6 +242,7 @@ export type PnlSummaryItem = {
   status: "closed" | "open";
   executed_at: string | null;
   quantity: number;
+  lot_size: number | null;
   pnl: number;
   charges: number;
   net_pnl: number;
@@ -252,14 +260,15 @@ export type PnlSummaryItem = {
 export function getPnlSummary(userId: number = config.defaultUserId): PnlSummaryItem[] {
   const trades = db
     .prepare(
-      `SELECT th.tradingsymbol, th.product, th.transaction_type, th.quantity, th.price, th.charges, th.executed_at,
-              i.name, i.instrument_type, i.expiry, i.strike
+      `SELECT th.tradingsymbol, th.exchange, th.product, th.transaction_type, th.quantity, th.price, th.charges, th.executed_at,
+              i.name, i.instrument_type, i.lot_size, i.expiry, i.strike
        FROM trade_history th
        LEFT JOIN instruments i ON i.instrument_token = th.instrument_token
        WHERE th.user_id = ? ORDER BY th.executed_at ASC, th.id ASC`
     )
     .all(userId) as {
     tradingsymbol: string;
+    exchange: string;
     product: string;
     transaction_type: "BUY" | "SELL";
     quantity: number;
@@ -268,6 +277,7 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
     executed_at: string;
     name: string | null;
     instrument_type: string | null;
+    lot_size: number | null;
     expiry: string | null;
     strike: number | null;
   }[];
@@ -284,7 +294,8 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
       current.realized_pnl,
       trade.transaction_type,
       trade.quantity,
-      trade.price
+      trade.price,
+      mcxUnitMultiplier(trade.exchange, trade.name)
     );
     state.set(key, { quantity: result.quantity, avg_price: result.avg_price, realized_pnl: result.realized_pnl });
 
@@ -295,6 +306,7 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
     if (result.closingQty > 0) {
       closedRows.push({
         tradingsymbol: trade.tradingsymbol,
+        exchange: trade.exchange,
         name: trade.name,
         instrument_type: trade.instrument_type,
         expiry: trade.expiry,
@@ -303,6 +315,7 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
         status: "closed",
         executed_at: trade.executed_at,
         quantity: trade.quantity,
+        lot_size: trade.lot_size,
         pnl: result.realized_pnl_delta,
         charges: trade.charges,
         net_pnl: result.realized_pnl_delta - trade.charges,
@@ -314,6 +327,7 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
     .filter((p) => p.quantity !== 0)
     .map((p): PnlSummaryItem => ({
       tradingsymbol: p.tradingsymbol,
+      exchange: p.exchange,
       name: p.name,
       instrument_type: p.instrument_type,
       expiry: p.expiry,
@@ -322,6 +336,7 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
       status: "open",
       executed_at: null,
       quantity: p.quantity,
+      lot_size: p.lot_size,
       pnl: p.unrealized_pnl,
       charges: 0,
       net_pnl: p.unrealized_pnl,
@@ -390,15 +405,21 @@ export function getTotalMarginBlocked(userId: number = config.defaultUserId): nu
 export function getTotalFnoUnrealizedPnl(userId: number = config.defaultUserId): number {
   const rows = db
     .prepare(
-      `SELECT p.instrument_token, p.quantity, p.avg_price
+      `SELECT p.instrument_token, p.quantity, p.avg_price, p.exchange, i.name
        FROM positions p
        JOIN instruments i ON i.instrument_token = p.instrument_token
        WHERE p.user_id = ? AND p.quantity != 0 AND i.instrument_type IN ('FUT','CE','PE')`
     )
-    .all(userId) as { instrument_token: number; quantity: number; avg_price: number }[];
+    .all(userId) as {
+    instrument_token: number;
+    quantity: number;
+    avg_price: number;
+    exchange: string;
+    name: string | null;
+  }[];
 
   return rows.reduce((sum, row) => {
     const ltp = getCachedLtp(row.instrument_token) ?? row.avg_price;
-    return sum + (ltp - row.avg_price) * row.quantity;
+    return sum + (ltp - row.avg_price) * row.quantity * mcxUnitMultiplier(row.exchange, row.name);
   }, 0);
 }

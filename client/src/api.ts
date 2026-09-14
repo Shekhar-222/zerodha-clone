@@ -115,6 +115,7 @@ export type Funds = {
 
 export type PnlSummaryItem = {
   tradingsymbol: string;
+  exchange: string;
   name?: string | null;
   instrument_type?: "EQ" | "FUT" | "CE" | "PE" | null;
   expiry?: string | null;
@@ -123,6 +124,7 @@ export type PnlSummaryItem = {
   status: "closed" | "open";
   executed_at: string | null;
   quantity: number;
+  lot_size?: number | null;
   pnl: number;
   charges: number;
   net_pnl: number;

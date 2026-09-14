@@ -207,7 +207,7 @@ async function fillOrder(order: OrderRow, fillPrice: number) {
   ).run(order.id, order.user_id, order.tradingsymbol, order.transaction_type, order.quantity, fillPrice);
 
   const instrument = getInstrumentByToken(order.instrument_token) as
-    | { exchange: string; tradingsymbol: string; instrument_type: string }
+    | { exchange: string; tradingsymbol: string; instrument_type: string; name: string | null }
     | undefined;
   const isFno = instrument !== undefined && FNO_TYPES.has(instrument.instrument_type);
 
@@ -272,6 +272,7 @@ async function fillOrder(order: OrderRow, fillPrice: number) {
       transactionType: order.transaction_type,
       quantity: order.quantity,
       fillPrice,
+      name: instrument.name,
     });
 
     setPositionMargin(order.instrument_token, order.product, newMargin, order.user_id);
@@ -310,6 +311,7 @@ async function fillOrder(order: OrderRow, fillPrice: number) {
       transactionType: order.transaction_type,
       quantity: order.quantity,
       fillPrice,
+      name: instrument?.name,
     });
 
     recordTransaction({

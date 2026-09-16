@@ -17,6 +17,39 @@ function formatQty(item: PnlSummaryItem): string {
   return `${item.quantity}`;
 }
 
+function formatMoney(n: number): string {
+  return `${n >= 0 ? "+" : "-"}₹${Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+/** Closed trades only — a still-open position hasn't actually booked anything yet, so it
+ * shouldn't count toward "booked" profit/loss. Uses net_pnl (after real trading charges),
+ * the same figure the "Incl. charges" column already shows per row. */
+function BookedSummary({ items }: { items: PnlSummaryItem[] }) {
+  const closed = items.filter((i) => i.status === "closed");
+  const totalProfit = closed.filter((i) => i.net_pnl > 0).reduce((sum, i) => sum + i.net_pnl, 0);
+  const totalLoss = closed.filter((i) => i.net_pnl < 0).reduce((sum, i) => sum + i.net_pnl, 0);
+  const netPnl = totalProfit + totalLoss;
+
+  return (
+    <div className="mb-4 grid grid-cols-1 gap-3 border-b border-gray-100 pb-4 sm:grid-cols-3">
+      <div className="rounded border border-gray-100 p-4 text-center">
+        <div className="text-2xl font-semibold text-gain">{formatMoney(totalProfit)}</div>
+        <div className="text-xs text-gray-500">Total profit booked</div>
+      </div>
+      <div className="rounded border border-gray-100 p-4 text-center">
+        <div className="text-2xl font-semibold text-loss">{formatMoney(totalLoss)}</div>
+        <div className="text-xs text-gray-500">Total loss booked</div>
+      </div>
+      <div className="rounded border border-gray-100 p-4 text-center">
+        <div className={`text-2xl font-semibold ${netPnl >= 0 ? "text-gain" : "text-loss"}`}>
+          {formatMoney(netPnl)}
+        </div>
+        <div className="text-xs text-gray-500">Net P&amp;L</div>
+      </div>
+    </div>
+  );
+}
+
 export function PnlSummary() {
   const [items, setItems] = useState<PnlSummaryItem[] | null>(null);
 
@@ -34,6 +67,8 @@ export function PnlSummary() {
 
   return (
     <div>
+      <BookedSummary items={items} />
+
       <div className="flex items-center justify-between pb-1 text-xs text-gray-400">
         <span>Symbol</span>
         <div className="flex gap-6">

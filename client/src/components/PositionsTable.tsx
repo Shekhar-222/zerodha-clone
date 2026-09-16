@@ -75,6 +75,15 @@ export function PositionsTable({
     return sum + (ltp - p.avg_price) * p.quantity * mcxUnitMultiplier(p.exchange, p.name);
   }, 0);
   const totalMargin = positions.reduce((sum, p) => sum + (p.margin_blocked || 0), 0);
+  // Same base each row's own P&L% uses (margin for F&O, invested value for equity), summed
+  // across every position — so the overall percentage is a true weighted average, not just
+  // an average of averages.
+  const totalMarginBase = positions.reduce((sum, p) => {
+    const multiplier = mcxUnitMultiplier(p.exchange, p.name);
+    const isFno = FNO_TYPES.has(p.instrument_type ?? "");
+    return sum + (isFno ? p.margin_blocked : Math.abs(p.avg_price * p.quantity * multiplier));
+  }, 0);
+  const totalPnlPct = totalMarginBase > 0 ? (totalPnl / totalMarginBase) * 100 : null;
 
   return (
     <>
@@ -179,7 +188,14 @@ export function PositionsTable({
             <td className="py-2.5 text-right tabular-nums font-medium text-gray-600">
               {totalMargin > 0 ? `₹${totalMargin.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}
             </td>
-            <td colSpan={2}></td>
+            <td
+              className={`py-2.5 text-right tabular-nums font-medium ${
+                totalPnlPct === null ? "text-gray-400" : totalPnlPct >= 0 ? "text-gain" : "text-loss"
+              }`}
+            >
+              {totalPnlPct === null ? "—" : `${totalPnlPct.toFixed(2)}%`}
+            </td>
+            <td></td>
           </tr>
         </tfoot>
       </table>

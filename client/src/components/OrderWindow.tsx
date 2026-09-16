@@ -8,6 +8,10 @@ function inr(n: number) {
   return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
+// Market orders only — Limit and standalone Stoploss order types are disabled here per
+// request, everywhere this popup is used (Watchlist, Option Chain, Positions exit, Chart).
+// The bracket stoploss/target-at-entry feature below is unaffected — it attaches to a Market
+// entry, it isn't a different order type of its own.
 export function OrderWindow({
   instrument,
   transactionType,
@@ -42,17 +46,12 @@ export function OrderWindow({
   const isFno = instrument.instrument_type != null && instrument.instrument_type !== "EQ";
   const lotSize = instrument.lot_size && instrument.lot_size > 0 ? instrument.lot_size : 1;
 
-  const [orderType, setOrderType] = useState<"MARKET" | "LIMIT" | "SL-M">("MARKET");
   const [product, setProduct] = useState<"MIS" | "CNC" | "NRML">(
     initialProduct ?? (isFno ? "NRML" : "CNC")
   );
   const [quantity, setQuantity] = useState(initialQuantity ?? (isFno ? lotSize : 1));
-  const [price, setPrice] = useState(ltp ?? 0);
-  const [stoplossPrice, setStoplossPrice] = useState(ltp ?? 0);
-  const needsStoploss = orderType === "SL-M";
-  const needsPrice = orderType === "LIMIT";
 
-  const canBracket = !lockSide && (orderType === "MARKET" || orderType === "LIMIT");
+  const canBracket = !lockSide;
   const [bracketEnabled, setBracketEnabled] = useState(false);
   const [bracketStoploss, setBracketStoploss] = useState(ltp ?? 0);
   const [bracketTarget, setBracketTarget] = useState(ltp ?? 0);
@@ -95,32 +94,16 @@ export function OrderWindow({
   const currentPrice = currentOption?.price ?? ltp ?? 0;
 
   useEffect(() => {
-    if (orderType === "MARKET" || orderType === "SL-M") setPrice(currentPrice);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPrice, orderType]);
-
-  // Seed a sensible stoploss price the moment SL is picked — a stop-loss only makes sense
-  // on the opposite side of the current price (BUY waits for a rise, SELL for a fall).
-  useEffect(() => {
-    if (!needsStoploss) return;
-    const offset = currentPrice * 0.005;
-    const seeded = isBuy ? currentPrice + offset : currentPrice - offset;
-    setStoplossPrice(Math.round(seeded * 20) / 20);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderType]);
-
-  useEffect(() => {
     if (!canBracket) setBracketEnabled(false);
   }, [canBracket]);
 
-  // Seed sensible bracket stoploss/target the moment the checkbox is turned on — mirrored
-  // around the entry price the same way the standalone stoploss trigger is.
-  const entryPrice = orderType === "LIMIT" ? price : currentPrice;
+  // Seed sensible bracket stoploss/target the moment the checkbox is turned on, mirrored
+  // around the current price.
   useEffect(() => {
     if (!bracketEnabled) return;
-    const offset = entryPrice * 0.01;
-    setBracketStoploss(Math.round((isBuy ? entryPrice - offset : entryPrice + offset) * 20) / 20);
-    setBracketTarget(Math.round((isBuy ? entryPrice + offset : entryPrice - offset) * 20) / 20);
+    const offset = currentPrice * 0.01;
+    setBracketStoploss(Math.round((isBuy ? currentPrice - offset : currentPrice + offset) * 20) / 20);
+    setBracketTarget(Math.round((isBuy ? currentPrice + offset : currentPrice - offset) * 20) / 20);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bracketEnabled]);
 
@@ -131,11 +114,9 @@ export function OrderWindow({
       await api.placeOrder({
         instrument_token: selected.instrument_token,
         transaction_type: side,
-        order_type: orderType,
+        order_type: "MARKET",
         product,
         quantity,
-        price: needsPrice ? price : undefined,
-        trigger_price: needsStoploss ? stoplossPrice : undefined,
         bracket_stoploss: canBracket && bracketEnabled ? bracketStoploss : undefined,
         bracket_target: canBracket && bracketEnabled ? bracketTarget : undefined,
       });
@@ -148,14 +129,12 @@ export function OrderWindow({
     }
   }
 
-  const effectivePrice = orderType === "SL-M" ? stoplossPrice : orderType === "MARKET" ? currentPrice : price;
-
   const [serverRequired, setServerRequired] = useState<number | null>(null);
   const [charges, setCharges] = useState<number | null>(null);
   const [marginLoading, setMarginLoading] = useState(false);
 
   useEffect(() => {
-    if (quantity <= 0 || effectivePrice <= 0) {
+    if (quantity <= 0 || currentPrice <= 0) {
       setServerRequired(null);
       setCharges(null);
       return;
@@ -166,11 +145,10 @@ export function OrderWindow({
         .getRequiredMargin({
           instrument_token: selected.instrument_token,
           transaction_type: side,
-          order_type: orderType,
+          order_type: "MARKET",
           product,
           quantity,
-          price: effectivePrice,
-          trigger_price: needsStoploss ? stoplossPrice : undefined,
+          price: currentPrice,
         })
         .then((res) => {
           setServerRequired(res.required);
@@ -184,9 +162,9 @@ export function OrderWindow({
     }, 400);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected.instrument_token, side, orderType, product, quantity, effectivePrice, stoplossPrice]);
+  }, [selected.instrument_token, side, product, quantity, currentPrice]);
 
-  const required = serverRequired ?? quantity * effectivePrice;
+  const required = serverRequired ?? quantity * currentPrice;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
@@ -279,11 +257,10 @@ export function OrderWindow({
                 </label>
               )}
             </div>
-            <span className="cursor-default text-link">Advanced ⌄</span>
           </div>
 
-          {/* Qty / Price / Stoploss */}
-          <div className={`mb-4 grid gap-4 ${needsStoploss ? "grid-cols-3" : "grid-cols-2"}`}>
+          {/* Qty / Price */}
+          <div className="mb-4 grid grid-cols-2 gap-4">
             <div>
               <div className="mb-1 text-xs text-gray-400">Qty.</div>
               <div className="relative">
@@ -310,62 +287,12 @@ export function OrderWindow({
               <div className="mb-1 text-xs text-gray-400">Price</div>
               <input
                 type="number"
-                step="0.05"
-                disabled={!needsPrice}
-                value={needsPrice ? price : currentPrice}
-                onChange={(e) => setPrice(Number(e.target.value))}
-                className="w-full border-b border-gray-300 pb-1 text-xl text-gray-800 focus:border-link focus:outline-none disabled:text-gray-400"
+                disabled
+                value={currentPrice}
+                className="w-full border-b border-gray-300 pb-1 text-xl text-gray-400 focus:outline-none"
               />
             </div>
-            {needsStoploss && (
-              <div>
-                <div className="mb-1 text-xs text-gray-400">Stoploss price</div>
-                <input
-                  type="number"
-                  step="0.05"
-                  value={stoplossPrice}
-                  onChange={(e) => setStoplossPrice(Number(e.target.value))}
-                  className="w-full border-b border-gray-300 pb-1 text-xl text-gray-800 focus:border-link focus:outline-none"
-                />
-              </div>
-            )}
           </div>
-
-          {/* Order type */}
-          <div className="mb-1 flex items-center gap-6 text-sm">
-            <label className="flex cursor-pointer items-center gap-1.5">
-              <input
-                type="radio"
-                checked={orderType === "MARKET"}
-                onChange={() => setOrderType("MARKET")}
-                className="accent-link"
-              />
-              Market
-            </label>
-            <label className="flex cursor-pointer items-center gap-1.5">
-              <input
-                type="radio"
-                checked={orderType === "LIMIT"}
-                onChange={() => setOrderType("LIMIT")}
-                className="accent-link"
-              />
-              Limit
-            </label>
-            <label className="flex cursor-pointer items-center gap-1.5">
-              <input
-                type="radio"
-                checked={orderType === "SL-M"}
-                onChange={() => setOrderType("SL-M")}
-                className="accent-link"
-              />
-              Stoploss
-            </label>
-          </div>
-          {needsStoploss && (
-            <div className="mb-4 text-xs text-gray-400">
-              Exits at market price once the market touches ₹{stoplossPrice.toFixed(2)}
-            </div>
-          )}
 
           {/* Bracket order: attach an SL + target exit at entry time */}
           {canBracket && (
@@ -428,12 +355,7 @@ export function OrderWindow({
           <div className="flex gap-2">
             <button
               onClick={submit}
-              disabled={
-                submitting ||
-                (needsPrice && price <= 0) ||
-                (needsStoploss && stoplossPrice <= 0) ||
-                (canBracket && bracketEnabled && (bracketStoploss <= 0 || bracketTarget <= 0))
-              }
+              disabled={submitting || (canBracket && bracketEnabled && (bracketStoploss <= 0 || bracketTarget <= 0))}
               className={`rounded px-6 py-2 text-sm font-medium text-white disabled:opacity-50 ${
                 isBuy ? "bg-link hover:bg-blue-600" : "bg-loss hover:bg-red-600"
               }`}

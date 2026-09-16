@@ -74,6 +74,7 @@ export function PnlSummary() {
         <div className="flex gap-6">
           <span className="w-20 whitespace-nowrap text-right">P&amp;L</span>
           <span className="w-24 whitespace-nowrap text-right">Incl. charges</span>
+          <span className="w-24 whitespace-nowrap text-right">Margin used</span>
         </div>
       </div>
       <div className="divide-y divide-gray-100">
@@ -100,6 +101,11 @@ export function PnlSummary() {
               <span className={`w-24 text-right tabular-nums ${item.net_pnl >= 0 ? "text-gain" : "text-loss"}`}>
                 {item.net_pnl >= 0 ? "+" : ""}
                 {item.net_pnl.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+              </span>
+              <span className="w-24 text-right tabular-nums text-gray-500">
+                {item.margin_used != null
+                  ? `₹${item.margin_used.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+                  : "—"}
               </span>
             </div>
           </div>

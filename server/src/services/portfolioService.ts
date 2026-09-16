@@ -3,6 +3,8 @@ import { config } from "../config";
 import { getCachedLtp } from "../kite/ticker";
 import { mcxUnitMultiplier } from "./mcxLotSizes";
 
+const FNO_TYPES = new Set(["FUT", "CE", "PE"]);
+
 export type PositionRow = {
   id: number;
   user_id: number;
@@ -246,6 +248,10 @@ export type PnlSummaryItem = {
   pnl: number;
   charges: number;
   net_pnl: number;
+  /** F&O only: margin blocked for the position right after this trade (or currently blocked,
+   * for a still-open position). Null for equity, and for closed F&O trades placed before this
+   * field existed (backfilled separately, approximated from today's margin rates). */
+  margin_used: number | null;
 };
 
 /**
@@ -260,7 +266,7 @@ export type PnlSummaryItem = {
 export function getPnlSummary(userId: number = config.defaultUserId): PnlSummaryItem[] {
   const trades = db
     .prepare(
-      `SELECT th.tradingsymbol, th.exchange, th.product, th.transaction_type, th.quantity, th.price, th.charges, th.executed_at,
+      `SELECT th.tradingsymbol, th.exchange, th.product, th.transaction_type, th.quantity, th.price, th.charges, th.executed_at, th.margin_used,
               i.name, i.instrument_type, i.lot_size, i.expiry, i.strike
        FROM trade_history th
        LEFT JOIN instruments i ON i.instrument_token = th.instrument_token
@@ -275,6 +281,7 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
     price: number;
     charges: number;
     executed_at: string;
+    margin_used: number | null;
     name: string | null;
     instrument_type: string | null;
     lot_size: number | null;
@@ -319,6 +326,7 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
         pnl: result.realized_pnl_delta,
         charges: trade.charges,
         net_pnl: result.realized_pnl_delta - trade.charges,
+        margin_used: trade.margin_used,
       });
     }
   }
@@ -340,6 +348,7 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
       pnl: p.unrealized_pnl,
       charges: 0,
       net_pnl: p.unrealized_pnl,
+      margin_used: FNO_TYPES.has(p.instrument_type ?? "") ? p.margin_blocked : null,
     }));
 
   return [

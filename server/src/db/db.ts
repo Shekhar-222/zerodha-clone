@@ -35,6 +35,9 @@ function migrate() {
   if (tradeHistoryCols.length > 0 && !tradeHistoryCols.includes("charges")) {
     db.exec("ALTER TABLE trade_history ADD COLUMN charges REAL NOT NULL DEFAULT 0");
   }
+  if (tradeHistoryCols.length > 0 && !tradeHistoryCols.includes("margin_used")) {
+    db.exec("ALTER TABLE trade_history ADD COLUMN margin_used REAL");
+  }
 
   const ordersTableSql = db
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'")

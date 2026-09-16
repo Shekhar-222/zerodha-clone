@@ -231,21 +231,24 @@ async function fillOrder(order: OrderRow, fillPrice: number) {
     console.warn("[charges] calculation failed for this fill, proceeding with zero charges", err);
   }
 
-  db.prepare(
-    `INSERT INTO trade_history (user_id, tradingsymbol, exchange, instrument_token, transaction_type, order_type, product, quantity, price, charges)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    order.user_id,
-    order.tradingsymbol,
-    order.exchange,
-    order.instrument_token,
-    order.transaction_type,
-    order.order_type,
-    order.product,
-    order.quantity,
-    fillPrice,
-    charges
-  );
+  const historyResult = db
+    .prepare(
+      `INSERT INTO trade_history (user_id, tradingsymbol, exchange, instrument_token, transaction_type, order_type, product, quantity, price, charges)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      order.user_id,
+      order.tradingsymbol,
+      order.exchange,
+      order.instrument_token,
+      order.transaction_type,
+      order.order_type,
+      order.product,
+      order.quantity,
+      fillPrice,
+      charges
+    );
+  const historyId = historyResult.lastInsertRowid;
 
   if (isFno && instrument) {
     // F&O cash impact is a margin block/release, not the full contract value: recompute the
@@ -276,6 +279,13 @@ async function fillOrder(order: OrderRow, fillPrice: number) {
     });
 
     setPositionMargin(order.instrument_token, order.product, newMargin, order.user_id);
+    // "Margin used for this trade" — for an opening/adding trade that's the fresh requirement
+    // it just created (newMargin); for a trade that reduces/closes the position, newMargin
+    // drops toward zero, so the meaningful number is what had been tied up in the position
+    // this trade is releasing (beforeMargin). Taking the larger of the two covers both without
+    // needing to special-case which kind of trade this is.
+    const marginUsedForTrade = Math.max(beforeMargin, newMargin);
+    db.prepare("UPDATE trade_history SET margin_used = ? WHERE id = ?").run(marginUsedForTrade, historyId);
 
     const cashDelta = -(newMargin - beforeMargin) + realizedPnlDelta - charges;
     adjustBalance(cashDelta, order.user_id);

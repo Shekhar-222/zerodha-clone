@@ -103,6 +103,11 @@ CREATE TABLE IF NOT EXISTS trade_history (
   quantity INTEGER NOT NULL,
   price REAL NOT NULL,
   charges REAL NOT NULL DEFAULT 0,
+  -- F&O only: the margin blocked for the resulting position immediately after this fill (NULL
+  -- for equity, which doesn't block margin the same way). Captured at fill time going forward;
+  -- older rows get it filled in later by a one-off backfill script using today's margin rates
+  -- as an approximation, since Kite has no historical margin-rate lookup.
+  margin_used REAL,
   executed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_trade_history_user ON trade_history(user_id, executed_at);

@@ -129,6 +129,7 @@ export type PnlSummaryItem = {
   pnl: number;
   charges: number;
   net_pnl: number;
+  margin_used?: number | null;
 };
 
 export type Transaction = {

@@ -7,6 +7,62 @@ export const db = new Database(config.dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
+/**
+ * For any still-open position with no opened_at yet (pre-existing rows from before that
+ * column existed), replay trade_history to find when it was *most recently* opened — the
+ * last time its running quantity crossed from zero to non-zero — so a position that's been
+ * closed and reopened gets today's re-entry time, not its very first-ever trade. No Kite API
+ * involved, so this is cheap enough to just run on every startup; it no-ops once caught up.
+ */
+function backfillPositionOpenedAt() {
+  const pending = db
+    .prepare("SELECT COUNT(*) as cnt FROM positions WHERE quantity != 0 AND opened_at IS NULL")
+    .get() as { cnt: number };
+  if (pending.cnt === 0) return;
+
+  const trades = db
+    .prepare(
+      `SELECT user_id, instrument_token, product, transaction_type, quantity, executed_at
+       FROM trade_history
+       ORDER BY user_id, instrument_token, product, executed_at ASC, id ASC`
+    )
+    .all() as {
+    user_id: number;
+    instrument_token: number;
+    product: string;
+    transaction_type: "BUY" | "SELL";
+    quantity: number;
+    executed_at: string;
+  }[];
+
+  const runningQty = new Map<string, number>();
+  const lastOpenedAt = new Map<string, string>();
+
+  for (const t of trades) {
+    const key = `${t.user_id}::${t.instrument_token}::${t.product}`;
+    const before = runningQty.get(key) ?? 0;
+    const signed = t.transaction_type === "BUY" ? t.quantity : -t.quantity;
+    const after = before + signed;
+    runningQty.set(key, after);
+    if (before === 0 && after !== 0) {
+      lastOpenedAt.set(key, t.executed_at);
+    }
+  }
+
+  const update = db.prepare(
+    `UPDATE positions SET opened_at = ?
+     WHERE user_id = ? AND instrument_token = ? AND product = ? AND opened_at IS NULL`
+  );
+  for (const [key, openedAt] of lastOpenedAt) {
+    const [userId, instrumentToken, product] = key.split("::");
+    update.run(openedAt, Number(userId), Number(instrumentToken), product);
+  }
+
+  // Any position with no matching trade_history at all (e.g. very old pre-history data) falls
+  // back to its last-updated time so it still sorts sensibly instead of staying NULL forever.
+  db.exec("UPDATE positions SET opened_at = updated_at WHERE quantity != 0 AND opened_at IS NULL");
+}
+
 function migrate() {
   const schema = fs.readFileSync(path.resolve(__dirname, "schema.sql"), "utf-8");
   db.exec(schema);
@@ -28,6 +84,10 @@ function migrate() {
   if (!positionCols.includes("margin_blocked")) {
     db.exec("ALTER TABLE positions ADD COLUMN margin_blocked REAL NOT NULL DEFAULT 0");
   }
+  if (!positionCols.includes("opened_at")) {
+    db.exec("ALTER TABLE positions ADD COLUMN opened_at TEXT");
+  }
+  backfillPositionOpenedAt();
 
   const tradeHistoryCols = (
     db.prepare("PRAGMA table_info(trade_history)").all() as { name: string }[]

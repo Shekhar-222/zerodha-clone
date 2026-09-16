@@ -123,6 +123,10 @@ CREATE TABLE IF NOT EXISTS positions (
   avg_price REAL NOT NULL DEFAULT 0,
   realized_pnl REAL NOT NULL DEFAULT 0,
   margin_blocked REAL NOT NULL DEFAULT 0,
+  -- When this position was most recently opened (went from flat to non-zero) — reset on every
+  -- fresh entry, including a re-entry after a full close, so the Positions tab can show
+  -- positions oldest-entry-first regardless of a row's original `id`.
+  opened_at TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(user_id, instrument_token, product)
 );

@@ -16,6 +16,7 @@ export type PositionRow = {
   avg_price: number;
   realized_pnl: number;
   margin_blocked: number;
+  opened_at: string | null;
   updated_at: string;
   name: string | null;
   instrument_type: string | null;
@@ -42,7 +43,8 @@ export function getPositions(userId: number = config.defaultUserId) {
       `SELECT p.*, i.name, i.instrument_type, i.lot_size, i.expiry, i.strike
        FROM positions p
        LEFT JOIN instruments i ON i.instrument_token = p.instrument_token
-       WHERE p.user_id = ? AND p.quantity != 0`
+       WHERE p.user_id = ? AND p.quantity != 0
+       ORDER BY COALESCE(p.opened_at, p.updated_at) ASC, p.id ASC`
     )
     .all(userId) as PositionRow[];
 
@@ -104,12 +106,15 @@ function upsertPosition(
   );
 
   db.prepare(
-    `INSERT INTO positions (user_id, tradingsymbol, exchange, instrument_token, product, quantity, avg_price, realized_pnl, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO positions (user_id, tradingsymbol, exchange, instrument_token, product, quantity, avg_price, realized_pnl, opened_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
      ON CONFLICT(user_id, instrument_token, product) DO UPDATE SET
        quantity = excluded.quantity,
        avg_price = excluded.avg_price,
        realized_pnl = excluded.realized_pnl,
+       -- A fresh entry (this row was flat before this fill) resets opened_at to now; adding to
+       -- or partially reducing an already-open position leaves its original entry time alone.
+       opened_at = CASE WHEN positions.quantity = 0 THEN excluded.opened_at ELSE positions.opened_at END,
        updated_at = datetime('now')`
   ).run(userId, tradingsymbol, exchange, instrumentToken, product, quantity, avg_price, realized_pnl);
 

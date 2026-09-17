@@ -336,31 +336,8 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
     }
   }
 
-  const openRows = getPositions(userId)
-    .filter((p) => p.quantity !== 0)
-    .map((p): PnlSummaryItem => ({
-      tradingsymbol: p.tradingsymbol,
-      exchange: p.exchange,
-      name: p.name,
-      instrument_type: p.instrument_type,
-      expiry: p.expiry,
-      strike: p.strike,
-      product: p.product,
-      status: "open",
-      executed_at: null,
-      quantity: p.quantity,
-      lot_size: p.lot_size,
-      pnl: p.unrealized_pnl,
-      charges: 0,
-      net_pnl: p.unrealized_pnl,
-      margin_used: FNO_TYPES.has(p.instrument_type ?? "") ? p.margin_blocked : null,
-    }));
-
-  return [
-    ...openRows.sort((a, b) => b.pnl - a.pnl),
-    // Most recently exited trade first.
-    ...closedRows.sort((a, b) => (b.executed_at ?? "").localeCompare(a.executed_at ?? "")),
-  ];
+  // Open positions are shown on the Positions tab already — this list is exited trades only.
+  return closedRows.sort((a, b) => (b.executed_at ?? "").localeCompare(a.executed_at ?? ""));
 }
 
 export function getHoldingQuantity(instrumentToken: number, userId: number = config.defaultUserId): number {

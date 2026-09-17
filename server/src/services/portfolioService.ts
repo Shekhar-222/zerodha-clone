@@ -358,7 +358,9 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
 
   return [
     ...openRows.sort((a, b) => b.pnl - a.pnl),
-    ...closedRows.sort((a, b) => (b.executed_at ?? "").localeCompare(a.executed_at ?? "")),
+    // Oldest exit first, most recently exited trade last — same "recent goes at the bottom"
+    // ordering as the Positions tab.
+    ...closedRows.sort((a, b) => (a.executed_at ?? "").localeCompare(b.executed_at ?? "")),
   ];
 }
 

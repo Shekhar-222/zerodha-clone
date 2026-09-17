@@ -711,14 +711,19 @@ export function listTrades(userId: number = config.defaultUserId) {
 }
 
 export function listTradeHistory(userId: number = config.defaultUserId, limit = 500) {
+  // Pick the most recent `limit` trades (innermost ORDER BY + LIMIT), then display them
+  // oldest-first so the most recently executed trade ends up at the bottom of the list.
   return db
     .prepare(
-      `SELECT th.*, i.name, i.instrument_type, i.expiry, i.strike
-       FROM trade_history th
-       LEFT JOIN instruments i ON i.instrument_token = th.instrument_token
-       WHERE th.user_id = ?
-       ORDER BY th.executed_at DESC, th.id DESC
-       LIMIT ?`
+      `SELECT * FROM (
+         SELECT th.*, i.name, i.instrument_type, i.expiry, i.strike
+         FROM trade_history th
+         LEFT JOIN instruments i ON i.instrument_token = th.instrument_token
+         WHERE th.user_id = ?
+         ORDER BY th.executed_at DESC, th.id DESC
+         LIMIT ?
+       )
+       ORDER BY executed_at ASC, id ASC`
     )
     .all(userId, limit);
 }

@@ -29,6 +29,13 @@ function toIsoDate(expiry: unknown): string | null {
   return null;
 }
 
+// Expiry is stored as a plain "YYYY-MM-DD" string, lexicographically comparable — but "today"
+// must be computed in IST regardless of the server's own timezone (AWS runs UTC), or a
+// contract expiring today could get dropped a few hours early for an Indian user.
+function todayIST(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
 export async function syncInstrumentsIfNeeded(): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
   const marker = `${SYNC_VERSION}:${today}`;
@@ -164,10 +171,10 @@ export function getOptionExpiries(underlyingName: string): string[] {
     db
       .prepare(
         `SELECT DISTINCT expiry FROM instruments
-         WHERE name = ? AND instrument_type IN ('CE','PE') AND expiry IS NOT NULL
+         WHERE name = ? AND instrument_type IN ('CE','PE') AND expiry IS NOT NULL AND expiry >= ?
          ORDER BY expiry`
       )
-      .all(underlyingName) as { expiry: string }[]
+      .all(underlyingName, todayIST()) as { expiry: string }[]
   ).map((r) => r.expiry);
 }
 

@@ -90,7 +90,7 @@ export function PositionsTable({
       <div className="max-h-[70vh] overflow-auto">
       <table className="w-full min-w-[640px] text-[15px]">
         <thead className="sticky top-0 z-10 bg-white">
-          <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
+          <tr className="border-b border-gray-200 text-center text-xs text-gray-500">
             <th className="w-8 py-2 font-normal">
               <input
                 type="checkbox"
@@ -100,13 +100,13 @@ export function PositionsTable({
               />
             </th>
             <th className="py-2 font-normal">Product</th>
-            <th className="py-2 font-normal">Instrument</th>
-            <th className="py-2 font-normal text-right">Qty.</th>
-            <th className="py-2 font-normal text-right">Avg</th>
-            <th className="py-2 font-normal text-right">LTP</th>
-            <th className="py-2 font-normal text-right">P&L</th>
-            <th className="py-2 font-normal text-right">Margin used</th>
-            <th className="py-2 font-normal text-right">P&L %</th>
+            <th className="py-2 text-left font-normal">Instrument</th>
+            <th className="py-2 font-normal">Qty.</th>
+            <th className="py-2 font-normal">Avg</th>
+            <th className="py-2 font-normal">LTP</th>
+            <th className="py-2 font-normal">P&L</th>
+            <th className="py-2 font-normal">Margin used</th>
+            <th className="py-2 font-normal">P&L %</th>
             <th className="w-14 py-2 font-normal"></th>
           </tr>
         </thead>
@@ -120,7 +120,7 @@ export function PositionsTable({
             const marginBase = isFno ? p.margin_blocked : Math.abs(p.avg_price * exactQty);
             const pnlPct = marginBase > 0 ? (pnl / marginBase) * 100 : null;
             return (
-              <tr key={p.id} className="group border-b border-gray-100 hover:bg-gray-50">
+              <tr key={p.id} className="group border-b border-gray-100 text-center hover:bg-gray-50">
                 <td className="py-2.5">
                   <input
                     type="checkbox"
@@ -134,12 +134,12 @@ export function PositionsTable({
                     {p.product}
                   </span>
                 </td>
-                <td className="py-2.5">
+                <td className="py-2.5 text-left">
                   <span className="font-medium text-gray-800">{formatContractLabel(p)}</span>{" "}
                   <span className="text-xs text-gray-400">{p.exchange}</span>
                 </td>
                 <td
-                  className={`py-2.5 text-right tabular-nums font-medium ${
+                  className={`py-2.5 tabular-nums font-medium ${
                     p.quantity >= 0 ? "text-link" : "text-loss"
                   }`}
                 >
@@ -150,22 +150,22 @@ export function PositionsTable({
                     </div>
                   )}
                 </td>
-                <td className="py-2.5 text-right tabular-nums text-gray-600">{p.avg_price.toFixed(2)}</td>
-                <td className="py-2.5 text-right tabular-nums text-gray-800">{ltp.toFixed(2)}</td>
-                <td className={`py-2.5 text-right tabular-nums font-medium ${pnl >= 0 ? "text-gain" : "text-loss"}`}>
+                <td className="py-2.5 tabular-nums text-gray-600">{p.avg_price.toFixed(2)}</td>
+                <td className="py-2.5 tabular-nums text-gray-800">{ltp.toFixed(2)}</td>
+                <td className={`py-2.5 tabular-nums font-medium ${pnl >= 0 ? "text-gain" : "text-loss"}`}>
                   {pnl.toFixed(2)}
                 </td>
-                <td className="py-2.5 text-right tabular-nums text-gray-600">
+                <td className="py-2.5 tabular-nums text-gray-600">
                   {isFno ? `₹${p.margin_blocked.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}
                 </td>
                 <td
-                  className={`py-2.5 text-right tabular-nums font-medium ${
+                  className={`py-2.5 tabular-nums font-medium ${
                     pnlPct === null ? "text-gray-400" : pnlPct >= 0 ? "text-gain" : "text-loss"
                   }`}
                 >
                   {pnlPct === null ? "—" : `${pnlPct.toFixed(2)}%`}
                 </td>
-                <td className="py-2.5 text-right opacity-0 transition-opacity group-hover:opacity-100">
+                <td className="py-2.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <button
                     onClick={() => setExiting(p)}
                     className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
@@ -178,18 +178,18 @@ export function PositionsTable({
           })}
         </tbody>
         <tfoot>
-          <tr>
+          <tr className="text-center">
             <td colSpan={6} className="py-2.5 text-right text-xs font-medium text-gray-500">
               Total
             </td>
-            <td className={`py-2.5 text-right tabular-nums font-medium ${totalPnl >= 0 ? "text-gain" : "text-loss"}`}>
+            <td className={`py-2.5 tabular-nums font-medium ${totalPnl >= 0 ? "text-gain" : "text-loss"}`}>
               {totalPnl.toFixed(2)}
             </td>
-            <td className="py-2.5 text-right tabular-nums font-medium text-gray-600">
+            <td className="py-2.5 tabular-nums font-medium text-gray-600">
               {totalMargin > 0 ? `₹${totalMargin.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}
             </td>
             <td
-              className={`py-2.5 text-right tabular-nums font-medium ${
+              className={`py-2.5 tabular-nums font-medium ${
                 totalPnlPct === null ? "text-gray-400" : totalPnlPct >= 0 ? "text-gain" : "text-loss"
               }`}
             >

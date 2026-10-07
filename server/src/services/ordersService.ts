@@ -60,7 +60,16 @@ export async function computeFnoMarginDelta(params: {
     }
   }
 
-  return { beforeMargin, newMargin, newQty, incrementalMargin: Math.max(0, newMargin - beforeMargin) };
+  // Pure reduction/close: same side (or flat) afterwards, with smaller exposure than before.
+  const isReducing = currentQty !== 0 && currentQty * newQty >= 0 && newQtyAbs < Math.abs(currentQty);
+
+  return {
+    beforeMargin,
+    newMargin,
+    newQty,
+    isReducing,
+    incrementalMargin: Math.max(0, newMargin - beforeMargin),
+  };
 }
 
 export const orderEvents = new EventEmitter();
@@ -393,7 +402,7 @@ async function validateAffordability(params: {
       console.warn("[charges] Kite charges API call failed, proceeding without charges in the check", err);
     }
 
-    const { incrementalMargin } = await computeFnoMarginDelta({
+    const { incrementalMargin, isReducing } = await computeFnoMarginDelta({
       userId,
       instrumentToken,
       product: product as "MIS" | "NRML",
@@ -403,6 +412,11 @@ async function validateAffordability(params: {
       quantity,
       price: estimatedPrice,
     });
+    // Exiting/reducing a position must always be allowed, even when the account balance is
+    // negative from losses — like a real broker, square-off is never blocked on funds; the
+    // charges are simply debited from the balance.
+    if (isReducing) return;
+
     const required = incrementalMargin + charges;
 
     const funds = getFunds(userId);
@@ -677,7 +691,87 @@ tickerEvents.on("ticks", async (ticks: Tick[]) => {
       await tryMatchOrder(order, tick.last_price);
     }
   }
+
+  await enforceRiskLimits();
 });
+
+/**
+ * RMS auto square-off, like a real broker's risk desk: once running F&O losses have eaten
+ * all free cash (available balance ≤ 0), open F&O positions are closed at market — most
+ * recently opened first, one at a time, until the balance is positive again — before the loss
+ * can run past the margin still blocked for them. Releasing that margin is what keeps the
+ * account from going negative.
+ */
+const squaringOffUsers = new Set<number>();
+
+async function enforceRiskLimits() {
+  const users = db
+    .prepare(
+      `SELECT DISTINCT p.user_id FROM positions p
+       JOIN instruments i ON i.instrument_token = p.instrument_token
+       WHERE p.quantity != 0 AND i.instrument_type IN ('FUT','CE','PE')`
+    )
+    .all() as { user_id: number }[];
+
+  for (const { user_id: userId } of users) {
+    if (squaringOffUsers.has(userId)) continue;
+    const funds = getFunds(userId);
+    if (!funds || funds.available_balance > 0) continue;
+
+    squaringOffUsers.add(userId);
+    try {
+      // Newest position first: exit the most recently opened one, re-check funds, and stop
+      // as soon as the account is back above zero so older positions are left untouched.
+      const positions = db
+        .prepare(
+          `SELECT p.instrument_token, p.product, p.quantity, p.tradingsymbol FROM positions p
+           JOIN instruments i ON i.instrument_token = p.instrument_token
+           WHERE p.user_id = ? AND p.quantity != 0 AND i.instrument_type IN ('FUT','CE','PE')
+           ORDER BY p.opened_at DESC, p.id DESC`
+        )
+        .all(userId) as { instrument_token: number; product: "MIS" | "NRML"; quantity: number; tradingsymbol: string }[];
+
+      for (const pos of positions) {
+        const current = getFunds(userId);
+        if (current && current.available_balance > 0) break;
+
+        console.warn(
+          `[rms] user ${userId}: available ₹${(current?.available_balance ?? 0).toFixed(2)} ≤ 0, auto squaring off ${pos.tradingsymbol} (${pos.product})`
+        );
+
+        // Cancel this position's pending orders (e.g. its bracket SL/target legs) so they
+        // can't fire against a position that no longer exists and reopen exposure.
+        const pending = db
+          .prepare(
+            "SELECT id FROM orders WHERE user_id = ? AND status = 'OPEN' AND instrument_token = ? AND product = ?"
+          )
+          .all(userId, pos.instrument_token, pos.product) as { id: number }[];
+        for (const { id } of pending) {
+          try {
+            cancelOrder(id, userId);
+          } catch {
+            // Already cancelled as a bracket sibling earlier in this loop.
+          }
+        }
+
+        try {
+          await placeOrder({
+            userId,
+            instrumentToken: pos.instrument_token,
+            transactionType: pos.quantity > 0 ? "SELL" : "BUY",
+            orderType: "MARKET",
+            product: pos.product,
+            quantity: Math.abs(pos.quantity),
+          });
+        } catch (err) {
+          console.error(`[rms] failed to square off ${pos.tradingsymbol}`, err);
+        }
+      }
+    } finally {
+      squaringOffUsers.delete(userId);
+    }
+  }
+}
 
 export function cancelOrder(orderId: number, userId: number = config.defaultUserId): OrderRow {
   const order = db

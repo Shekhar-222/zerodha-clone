@@ -48,25 +48,76 @@ kite.setSessionExpiryHook(() => {
   console.warn("[kite] session expired — clearing stored token and attempting auto re-login");
   clearSession();
   stopTicker();
-  autoLogin().catch((err) => console.error("[auto-login] retry on expiry failed", err));
+  tryAutoLogin("session expired").catch((err) => console.error("[auto-login] retry on expiry failed", err));
 });
 
-async function connect() {
-  // If we already have a valid access token from an earlier login today, resume the live
-  // feed and warm the instrument cache without requiring the user to log in again.
-  const existingToken = loadStoredSession();
-  if (existingToken) {
-    startTicker(existingToken);
-    subscribeTokens(getAllTrackedInstrumentTokens());
-    syncInstrumentsIfNeeded().catch((err) => console.error("[startup] instrument sync failed", err));
-    return;
-  }
+// A failed auto-login (bad password/TOTP, Kite page change) shouldn't be hammered every
+// check — repeated wrong-credential attempts can get the Kite account locked.
+const AUTO_LOGIN_RETRY_MS = 30 * 60 * 1000;
+let lastAutoLoginFailureAt = 0;
 
-  console.log("[server] no active Kite session — attempting auto-login...");
+async function tryAutoLogin(reason: string) {
+  if (Date.now() - lastAutoLoginFailureAt < AUTO_LOGIN_RETRY_MS) return;
+  console.log(`[server] ${reason} — attempting auto-login...`);
   const ok = await autoLogin();
-  if (!ok) {
-    console.log("[server] auto-login unavailable/failed — visit /api/auth/login to log in manually");
+  if (ok) {
+    lastAutoLoginFailureAt = 0;
+    syncInstrumentsIfNeeded().catch((err) => console.error("[startup] instrument sync failed", err));
+  } else {
+    lastAutoLoginFailureAt = Date.now();
+    console.log("[server] auto-login unavailable/failed — will retry in 30 min, or visit /api/auth/login to log in manually");
   }
 }
 
-connect();
+/**
+ * Kite access tokens die every morning (~6 AM IST), but nothing announces it: the ticker just
+ * drops and reconnects with the dead token, and the expiry hook only fires once some REST call
+ * happens to be rejected. A token stored yesterday also survives a server restart. So verify
+ * the session with a cheap live call — at startup and then periodically — and log in again
+ * as soon as it's gone, instead of waiting for someone to open the app and notice.
+ */
+async function ensureSession() {
+  const token = loadStoredSession();
+  if (!token) {
+    await tryAutoLogin("no active Kite session");
+    return;
+  }
+
+  try {
+    await kite.getProfile();
+  } catch (err: any) {
+    if (err?.error_type === "TokenException") {
+      // The expiry hook has already cleared the session and kicked off a re-login.
+      return;
+    }
+    console.warn("[server] session check failed (network?), will re-check shortly:", err?.message ?? err);
+  }
+}
+
+async function connect() {
+  const existingToken = loadStoredSession();
+  if (existingToken) {
+    try {
+      await kite.getProfile();
+      // Still valid from an earlier login today — resume the live feed without logging in again.
+      startTicker(existingToken);
+      subscribeTokens(getAllTrackedInstrumentTokens());
+      syncInstrumentsIfNeeded().catch((err) => console.error("[startup] instrument sync failed", err));
+      return;
+    } catch (err: any) {
+      if (err?.error_type === "TokenException") return; // expiry hook is re-logging in
+      console.warn("[startup] could not verify stored session, starting feed anyway:", err?.message ?? err);
+      startTicker(existingToken);
+      subscribeTokens(getAllTrackedInstrumentTokens());
+      return;
+    }
+  }
+
+  await tryAutoLogin("no active Kite session");
+}
+
+connect().finally(() => {
+  setInterval(() => {
+    ensureSession().catch((err) => console.error("[server] session check failed", err));
+  }, 5 * 60 * 1000);
+});

@@ -100,7 +100,16 @@ async function runAutoLogin(): Promise<boolean> {
     // With the persistent profile, Kite often already remembers the user id from a previous
     // run and skips straight to a password-only screen (id shown as static text + "Change
     // user" instead of an input) — only fill it when it's actually there to be filled.
-    const userIdInput = page.locator("#userid");
+    // Kite has renamed this field before ("User ID" -> "Phone number or User ID"), so match
+    // on several attributes rather than one id; the only visible non-password text input on
+    // the form is the user id field.
+    await page.waitForSelector("#password", { timeout: 15000 }).catch(() => {});
+    const userIdInput = page
+      .locator(
+        '#userid, input[name="user_id"], input[name="userid"], input[autocomplete="username"], ' +
+          'input[type="text"]:visible, input[type="tel"]:visible'
+      )
+      .first();
     if (await userIdInput.isVisible({ timeout: 5000 }).catch(() => false)) {
       await userIdInput.fill(config.kiteUserId);
     } else {

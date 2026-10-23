@@ -177,7 +177,10 @@ export function PositionsTable({
             );
           })}
         </tbody>
-        <tfoot>
+        {/* Pinned to the bottom of the scroll area so the total stays visible with many
+            positions. A box-shadow stands in for the top border, which doesn't render on a
+            sticky row in a collapsed-border table. */}
+        <tfoot className="sticky bottom-0 z-10 bg-white shadow-[0_-1px_0_0_#e5e7eb]">
           <tr className="text-center">
             <td colSpan={6} className="py-2.5 text-right text-xs font-medium text-gray-500">
               Total

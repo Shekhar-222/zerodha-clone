@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Layers, RotateCcw } from "lucide-react";
 import { api, Funds, Instrument } from "../api";
 import { formatContractLabel } from "../formatContract";
+import { mcxUnitMultiplierForSymbol } from "../mcxLotSizes";
 
 function inr(n: number) {
   return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
@@ -166,6 +167,28 @@ export function OrderWindow({
 
   const required = serverRequired ?? quantity * currentPrice;
 
+  // "Amount" entry: type a rupee amount and Qty is worked out as amount ÷ price, rounded down
+  // to whole lots so it never spends more than typed. Only offered where price × qty is the
+  // real cost — stocks and option buying. Futures and option selling block margin instead,
+  // so an amount there would be misleading.
+  const isOption = selected.instrument_type === "CE" || selected.instrument_type === "PE";
+  const amountAllowed = !isFno || (isOption && isBuy);
+  const [qtyMode, setQtyMode] = useState<"QTY" | "AMOUNT">("QTY");
+  const [amount, setAmount] = useState("");
+  const amountMode = amountAllowed && qtyMode === "AMOUNT";
+  const minQty = isFno ? lotSize : 1;
+  // Cost of one order step: one share for stocks, one lot for F&O. MCX quantities are lot
+  // counts priced per physical unit, hence the extra unit multiplier.
+  const unitMultiplier = mcxUnitMultiplierForSymbol(selected.exchange, selected.name, selected.tradingsymbol);
+  const stepCost = currentPrice * minQty * unitMultiplier;
+  const amountValue = Number(amount);
+  const stepsAffordable = stepCost > 0 && amountValue > 0 ? Math.floor(amountValue / stepCost) : 0;
+
+  useEffect(() => {
+    if (!amountMode || !(amountValue > 0) || stepCost <= 0) return;
+    setQuantity(Math.max(1, stepsAffordable) * minQty);
+  }, [amountMode, amountValue, stepCost, stepsAffordable, minQty]);
+
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
       <div className="max-h-full w-full max-w-[520px] overflow-y-auto rounded-md bg-white shadow-xl">
@@ -262,7 +285,56 @@ export function OrderWindow({
           {/* Qty / Price */}
           <div className="mb-4 grid grid-cols-2 gap-4">
             <div>
-              <div className="mb-1 text-xs text-gray-400">Qty.</div>
+              <div className="mb-1 flex items-center justify-between text-xs text-gray-400">
+                <span>{amountMode ? "Amount (₹)" : "Qty."}</span>
+                {amountAllowed && (
+                  <span className="flex overflow-hidden rounded border border-gray-200 text-[11px]">
+                    {(["QTY", "AMOUNT"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setQtyMode(m)}
+                        className={`px-1.5 py-0.5 ${
+                          qtyMode === m ? "bg-link text-white" : "text-gray-500 hover:bg-gray-50"
+                        }`}
+                      >
+                        {m === "QTY" ? "Qty" : "₹ Amount"}
+                      </button>
+                    ))}
+                  </span>
+                )}
+              </div>
+              {amountMode ? (
+                <>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    autoFocus
+                    placeholder="e.g. 10000"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="w-full border-b border-gray-300 pb-1 text-xl text-gray-800 focus:border-link focus:outline-none"
+                  />
+                  <div className="mt-1 text-xs text-gray-400">
+                    {amountValue > 0 && stepCost > 0 ? (
+                      stepsAffordable >= 1 ? (
+                        <>
+                          Qty <span className="font-medium text-gray-700">{quantity}</span>
+                          {isFno && ` (${stepsAffordable} lot${stepsAffordable === 1 ? "" : "s"})`} · ₹
+                          {inr(stepsAffordable * stepCost)}
+                        </>
+                      ) : (
+                        <span className="text-loss">
+                          Not enough for 1 {isFno ? "lot" : "share"} (needs ₹{inr(stepCost)}) · Qty kept at {minQty}
+                        </span>
+                      )
+                    ) : (
+                      "Qty is calculated from the amount"
+                    )}
+                  </div>
+                </>
+              ) : (
               <div className="relative">
                 <input
                   type="number"
@@ -274,7 +346,8 @@ export function OrderWindow({
                 />
                 <Layers size={15} className="absolute right-0 top-1.5 text-gray-300" />
               </div>
-              {isFno && (
+              )}
+              {isFno && !amountMode && (
                 <div className="mt-1 text-xs text-gray-400">
                   Lot size: {lotSize}
                   {quantity % lotSize !== 0 && (

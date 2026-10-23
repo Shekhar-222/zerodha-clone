@@ -24,3 +24,19 @@ export function mcxUnitMultiplier(exchange: string, name: string | null | undefi
   }
   return 1;
 }
+
+// Same multiplier, for callers that only have a contract's tradingsymbol (e.g. option-chain
+// legs, whose `name` is the full symbol like CRUDEOIL26OCT5000CE rather than CRUDEOIL).
+// Longest matching prefix wins so CRUDEOILM isn't read as CRUDEOIL.
+export function mcxUnitMultiplierForSymbol(
+  exchange: string,
+  name: string | null | undefined,
+  tradingsymbol: string
+): number {
+  if (exchange !== "MCX") return 1;
+  if (name && MCX_LOT_SIZES[name]) return MCX_LOT_SIZES[name];
+  const key = Object.keys(MCX_LOT_SIZES)
+    .filter((k) => tradingsymbol.startsWith(k))
+    .sort((a, b) => b.length - a.length)[0];
+  return key ? MCX_LOT_SIZES[key] : 1;
+}

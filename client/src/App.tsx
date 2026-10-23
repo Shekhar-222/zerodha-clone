@@ -121,7 +121,7 @@ export default function App() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f4f4f4] p-4">
         <div className="w-full max-w-sm rounded-md border border-gray-200 bg-white p-6 text-center shadow-sm sm:p-10">
-          <h1 className="mb-2 text-2xl font-semibold text-gray-800">Kite Paper</h1>
+          <h1 className="mb-2 text-2xl font-semibold text-[#00A693]">Art of Trading</h1>
           <p className="mb-6 text-gray-500">Log in with your Zerodha Kite account to fetch live market data.</p>
 
           {autoLoginStatus === "trying" && (

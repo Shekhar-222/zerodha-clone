@@ -53,10 +53,7 @@ export function HeaderNav({
           <Menu size={20} />
         </button>
 
-        <div className="flex select-none items-center gap-1.5 text-lg font-semibold text-accent">
-          <span className="inline-block h-5 w-5 shrink-0 rounded-sm bg-accent" />
-          Kite Paper
-        </div>
+        <div className="select-none text-lg font-semibold text-[#00A693]">Art of Trading</div>
 
         <div className="hidden flex-1 justify-end md:flex">
           <nav className="mr-8 flex items-center gap-6 text-sm">

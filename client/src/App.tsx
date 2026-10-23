@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, Instrument, Order, Position, Holding, Funds, Profile } from "./api";
+import { api, Instrument, Order, Position, Holding, Funds } from "./api";
 import { useLiveData } from "./hooks/useLiveData";
 import { IndexTicker } from "./components/IndexTicker";
 import { HeaderNav, Tab } from "./components/HeaderNav";
@@ -26,7 +26,6 @@ const TAB_TITLES: Record<Tab, string> = {
 export default function App() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [autoLoginStatus, setAutoLoginStatus] = useState<"idle" | "trying" | "failed">("idle");
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [tab, setTab] = useState<Tab>("positions");
   const [orders, setOrders] = useState<Order[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
@@ -65,7 +64,6 @@ export default function App() {
   useEffect(() => {
     if (loggedIn) {
       refreshAll();
-      api.getProfile().then(setProfile).catch(console.error);
     }
   }, [loggedIn]);
 
@@ -102,7 +100,6 @@ export default function App() {
     } catch (err) {
       console.error(err);
     } finally {
-      setProfile(null);
       setAutoLoginStatus("idle");
       setLoggedIn(false);
     }
@@ -161,7 +158,6 @@ export default function App() {
       <HeaderNav
         tab={tab}
         onTabChange={setTab}
-        profile={profile}
         onToggleWatchlist={() => setWatchlistOpen((v) => !v)}
         onLogout={handleLogout}
       />

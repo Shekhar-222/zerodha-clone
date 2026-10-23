@@ -1,5 +1,4 @@
 import { Bell, LogOut, Menu, ShoppingCart } from "lucide-react";
-import { Profile } from "../api";
 
 export type Tab = "dashboard" | "chart" | "orders" | "holdings" | "positions" | "funds" | "history";
 
@@ -16,17 +15,14 @@ const TABS: { id: Tab; label: string }[] = [
 export function HeaderNav({
   tab,
   onTabChange,
-  profile,
   onToggleWatchlist,
   onLogout,
 }: {
   tab: Tab;
   onTabChange: (tab: Tab) => void;
-  profile: Profile | null;
   onToggleWatchlist: () => void;
   onLogout: () => void;
 }) {
-  const initials = profile?.user_shortname?.slice(0, 2).toUpperCase() ?? "??";
 
   const tabButton = (t: (typeof TABS)[number], extraClass: string) => (
     <button
@@ -68,12 +64,6 @@ export function HeaderNav({
           <button className="hover:text-gray-800" title="Notifications">
             <Bell size={18} />
           </button>
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-100 text-xs font-semibold text-accent">
-              {initials}
-            </span>
-            <span className="hidden text-sm text-gray-700 sm:inline">{profile?.user_id ?? ""}</span>
-          </div>
           <button onClick={onLogout} className="hover:text-loss" title="Logout">
             <LogOut size={18} />
           </button>

@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Star, X } from "lucide-react";
 import { api, Instrument, OptionChainLeg, Quote } from "../api";
 import { OrderWindow } from "./OrderWindow";
 
-const STRIKES_EACH_SIDE = 10;
+// The full chain can run to several hundred contracts. Kite's quote API takes at most 500
+// instruments per call, and a very long ?tokens= query string can be rejected by Nginx, so
+// quotes are fetched in batches and merged.
+const QUOTE_BATCH_SIZE = 200;
 
 function formatExpiry(iso: string) {
   const d = new Date(iso);
@@ -153,9 +156,12 @@ export function OptionChain({
   }, [underlyingKey]);
 
   function loadQuotes(tokens: number[]) {
-    api
-      .getQuotes(tokens)
-      .then((res) => setQuotes(res))
+    const batches: number[][] = [];
+    for (let i = 0; i < tokens.length; i += QUOTE_BATCH_SIZE) {
+      batches.push(tokens.slice(i, i + QUOTE_BATCH_SIZE));
+    }
+    Promise.all(batches.map((batch) => api.getQuotes(batch).catch(() => ({}))))
+      .then((results) => setQuotes(Object.assign({}, ...results)))
       .catch(() => {});
   }
 
@@ -191,11 +197,15 @@ export function OptionChain({
     spotLtp !== undefined && strikes.length > 0
       ? strikes.reduce((closest, s) => (Math.abs(s - spotLtp) < Math.abs(closest - spotLtp) ? s : closest))
       : null;
-  const atmIndex = atmStrike !== null ? strikes.indexOf(atmStrike) : Math.floor(strikes.length / 2);
-  const visibleStrikes = strikes.slice(
-    Math.max(0, atmIndex - STRIKES_EACH_SIDE),
-    atmIndex + STRIKES_EACH_SIDE + 1
-  );
+  const scrollStrike = atmStrike ?? strikes[Math.floor(strikes.length / 2)];
+
+  // Every strike is listed, so open the chain scrolled to the ATM row rather than the lowest
+  // strike. Only on load/expiry change — not on every quote refresh, which would yank the
+  // list back while the user is scrolling.
+  const atmRowRef = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => {
+    if (!loading) atmRowRef.current?.scrollIntoView({ block: "center" });
+  }, [loading, expiry]);
 
   const byStrike = new Map<number, { ce?: OptionChainLeg; pe?: OptionChainLeg }>();
   for (const leg of chain) {
@@ -267,7 +277,7 @@ export function OptionChain({
                 </tr>
               </thead>
               <tbody>
-                {visibleStrikes.map((strike) => {
+                {strikes.map((strike) => {
                   const { ce, pe } = byStrike.get(strike) ?? {};
                   const isAtm = strike === atmStrike;
                   const ceItm = spotLtp !== undefined && strike < spotLtp;
@@ -276,7 +286,11 @@ export function OptionChain({
                   const peQuote = pe ? quotes[pe.instrument_token] : undefined;
 
                   return (
-                    <tr key={strike} className="group border-b border-gray-50 hover:bg-gray-50">
+                    <tr
+                      key={strike}
+                      ref={strike === scrollStrike ? atmRowRef : undefined}
+                      className="group border-b border-gray-50 hover:bg-gray-50"
+                    >
                       <LegCell
                         leg={ce}
                         quote={ceQuote}

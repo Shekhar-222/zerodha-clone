@@ -6,6 +6,7 @@ import { formatContractLabel } from "../formatContract";
 import { mcxUnitMultiplier } from "../mcxLotSizes";
 
 const FNO_TYPES = new Set(["FUT", "CE", "PE"]);
+const INSTANT_EXIT_KEY = "positions.instantExit";
 
 function toInstrument(p: Position): Instrument {
   return {
@@ -20,19 +21,68 @@ function toInstrument(p: Position): Instrument {
   };
 }
 
+/**
+ * Instant exit: when on, a row's Exit button squares off that position at market straight
+ * away, with no order popup to confirm. Remembered per browser so it survives a reload. The
+ * state lives in App because the switch sits beside the page heading, outside this table.
+ */
+export function useInstantExit(): [boolean, (on: boolean) => void] {
+  const [instantExit, setInstantExit] = useState(() => {
+    try {
+      return localStorage.getItem(INSTANT_EXIT_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  function setPersisted(on: boolean) {
+    setInstantExit(on);
+    try {
+      localStorage.setItem(INSTANT_EXIT_KEY, on ? "1" : "0");
+    } catch {
+      // Storage blocked (private mode etc.) — the switch still works for this session.
+    }
+  }
+
+  return [instantExit, setPersisted];
+}
+
+export function InstantExitToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label
+      className="flex cursor-pointer select-none items-center gap-2 text-sm text-gray-600"
+      title="When on, a row's Exit button exits that position at market immediately, without the order popup"
+    >
+      <input type="checkbox" className="peer sr-only" checked={on} onChange={(e) => onChange(e.target.checked)} />
+      <span className="relative h-5 w-9 rounded-full bg-gray-300 transition-colors peer-checked:bg-loss">
+        <span
+          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+            on ? "left-[18px]" : "left-0.5"
+          }`}
+        />
+      </span>
+      Instant exit
+    </label>
+  );
+}
+
 export function PositionsTable({
   positions,
   ltpByToken,
+  instantExit,
   onGetStarted,
   onChanged,
 }: {
   positions: Position[];
   ltpByToken: Record<number, number>;
+  instantExit: boolean;
   onGetStarted: () => void;
   onChanged: () => void;
 }) {
   const [exiting, setExiting] = useState<Position | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [instantExitingIds, setInstantExitingIds] = useState<Set<number>>(new Set());
+  const [exitError, setExitError] = useState<string | null>(null);
 
   if (positions.length === 0) {
     return (
@@ -70,6 +120,30 @@ export function PositionsTable({
     onChanged();
   }
 
+  async function instantExitPosition(p: Position) {
+    if (instantExitingIds.has(p.id)) return; // ignore double clicks while the order is in flight
+    setExitError(null);
+    setInstantExitingIds((prev) => new Set(prev).add(p.id));
+    try {
+      await api.placeOrder({
+        instrument_token: p.instrument_token,
+        transaction_type: p.quantity > 0 ? "SELL" : "BUY",
+        order_type: "MARKET",
+        product: p.product,
+        quantity: Math.abs(p.quantity),
+      });
+      onChanged();
+    } catch (err: any) {
+      setExitError(`Could not exit ${formatContractLabel(p)}: ${err.message ?? "order failed"}`);
+    } finally {
+      setInstantExitingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(p.id);
+        return next;
+      });
+    }
+  }
+
   const totalPnl = positions.reduce((sum, p) => {
     const ltp = ltpByToken[p.instrument_token] ?? p.ltp;
     return sum + (ltp - p.avg_price) * p.quantity * mcxUnitMultiplier(p.exchange, p.name);
@@ -87,6 +161,7 @@ export function PositionsTable({
 
   return (
     <>
+      {exitError && <div className="mb-2 text-xs text-loss">{exitError}</div>}
       <div className="max-h-[70vh] overflow-auto">
       <table className="w-full min-w-[640px] text-[15px]">
         <thead className="sticky top-0 z-10 bg-white">
@@ -165,13 +240,28 @@ export function PositionsTable({
                 >
                   {pnlPct === null ? "—" : `${pnlPct.toFixed(2)}%`}
                 </td>
-                <td className="py-2.5 opacity-0 transition-opacity group-hover:opacity-100">
-                  <button
-                    onClick={() => setExiting(p)}
-                    className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-                  >
-                    Exit
-                  </button>
+                <td
+                  className={`py-2.5 transition-opacity group-hover:opacity-100 ${
+                    instantExitingIds.has(p.id) ? "opacity-100" : "opacity-0"
+                  }`}
+                >
+                  {instantExit ? (
+                    <button
+                      onClick={() => instantExitPosition(p)}
+                      disabled={instantExitingIds.has(p.id)}
+                      title="Exit at market now — no confirmation"
+                      className="rounded bg-loss px-2 py-1 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-60"
+                    >
+                      {instantExitingIds.has(p.id) ? "Exiting…" : "Exit"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setExiting(p)}
+                      className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                    >
+                      Exit
+                    </button>
+                  )}
                 </td>
               </tr>
             );

@@ -5,7 +5,7 @@ import { IndexTicker } from "./components/IndexTicker";
 import { HeaderNav, Tab } from "./components/HeaderNav";
 import { Watchlist } from "./components/Watchlist";
 import { ChartPanel } from "./components/ChartPanel";
-import { PositionsTable } from "./components/PositionsTable";
+import { PositionsTable, InstantExitToggle, useInstantExit } from "./components/PositionsTable";
 import { HoldingsTable } from "./components/HoldingsTable";
 import { OrdersTable } from "./components/OrdersTable";
 import { FundsBar } from "./components/FundsBar";
@@ -29,6 +29,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("positions");
   const [orders, setOrders] = useState<Order[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [instantExit, setInstantExit] = useInstantExit();
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [funds, setFunds] = useState<Funds | null>(null);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
@@ -186,7 +187,12 @@ export default function App() {
 
         <main className="flex-1 overflow-y-auto bg-[#f7f7f7] p-3 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h1 className="text-lg font-medium text-gray-800">{TAB_TITLES[tab]}</h1>
+            <div className="flex items-center gap-8">
+              <h1 className="text-lg font-medium text-gray-800">{TAB_TITLES[tab]}</h1>
+              {tab === "positions" && positions.length > 0 && (
+                <InstantExitToggle on={instantExit} onChange={setInstantExit} />
+              )}
+            </div>
             {tab === "dashboard" && <FundsBar funds={funds} />}
           </div>
 
@@ -228,6 +234,7 @@ export default function App() {
               <PositionsTable
                 positions={positions}
                 ltpByToken={ltpByToken}
+                instantExit={instantExit}
                 onGetStarted={focusSearch}
                 onChanged={refreshAll}
               />

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getPositions, getHoldings, getPnlSummary, getPnlCalendar } from "../services/portfolioService";
+import { getPositions, getHoldings, getPnlSummary } from "../services/portfolioService";
 import { getFunds, getTransactions, resetAccount } from "../services/fundsService";
 
 export const portfolioRouter = Router();
@@ -22,10 +22,6 @@ portfolioRouter.get("/transactions", (_req, res) => {
 
 portfolioRouter.get("/pnl-summary", (_req, res) => {
   res.json(getPnlSummary());
-});
-
-portfolioRouter.get("/pnl-calendar", (_req, res) => {
-  res.json(getPnlCalendar());
 });
 
 portfolioRouter.post("/reset", (_req, res) => {

@@ -259,16 +259,37 @@ export type PnlSummaryItem = {
   margin_used: number | null;
 };
 
+type ClosingEvent = {
+  tradingsymbol: string;
+  exchange: string;
+  product: string;
+  instrument_type: string | null;
+  name: string | null;
+  lot_size: number | null;
+  expiry: string | null;
+  strike: number | null;
+  quantity: number;
+  executed_at: string;
+  margin_used: number | null;
+  grossPnl: number;
+  /** This exit's own charges PLUS a fair share of the charges paid to open the portion of
+   * the position being closed here — not just this trade's own charges. */
+  totalCharges: number;
+};
+
 /**
- * Per-trade P&L, not per-symbol: if you round-tripped the same stock three times today,
- * you get three separate rows (one per closing trade), each with its own realized P&L and
- * that trade's own charges — not one number that hides how each individual trade actually
- * went. Replays trade_history in order through the same weighted-average logic positions
- * use, so a closing trade's realized_pnl_delta is exactly what that trade contributed.
- * Currently open positions get one row each for live unrealized P&L (nothing to split up
- * yet since they haven't been closed).
+ * Replays trade_history in execution order through the same weighted-average position logic
+ * `positions` itself uses, producing one ClosingEvent per trade that closed some exposure
+ * (a pure opening trade produces none — nothing has been "realized" yet).
+ *
+ * Charges are paid on both legs of a round trip, not just the exit, so a trade's own charges
+ * alone understate what that exit really cost. Entry charges are tracked as a weighted-average
+ * "charge per unit" per open position (same mechanism avg_price already uses for price) and
+ * released proportionally into each closing event as that position gets reduced — so a closing
+ * trade's totalCharges reflects the full round-trip cost of the quantity it actually closed.
+ * Still-open positions keep their entry charges sitting unreleased until they're closed.
  */
-export function getPnlSummary(userId: number = config.defaultUserId): PnlSummaryItem[] {
+function replayClosedTrades(userId: number): { events: ClosingEvent[] } {
   const trades = db
     .prepare(
       `SELECT th.tradingsymbol, th.exchange, th.product, th.transaction_type, th.quantity, th.price, th.charges, th.executed_at, th.margin_used,
@@ -294,12 +315,18 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
     strike: number | null;
   }[];
 
-  const state = new Map<string, { quantity: number; avg_price: number; realized_pnl: number }>();
-  const closedRows: PnlSummaryItem[] = [];
+  const state = new Map<
+    string,
+    { quantity: number; avg_price: number; realized_pnl: number; entryChargePerUnit: number }
+  >();
+  const events: ClosingEvent[] = [];
 
   for (const trade of trades) {
     const key = `${trade.tradingsymbol}::${trade.product}`;
-    const current = state.get(key) ?? { quantity: 0, avg_price: 0, realized_pnl: 0 };
+    const current = state.get(key) ?? { quantity: 0, avg_price: 0, realized_pnl: 0, entryChargePerUnit: 0 };
+    const signedTradeQty = trade.transaction_type === "BUY" ? trade.quantity : -trade.quantity;
+    const addingToPosition = current.quantity === 0 || Math.sign(current.quantity) === Math.sign(signedTradeQty);
+
     const result = applyFill(
       current.quantity,
       current.avg_price,
@@ -309,125 +336,91 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
       trade.price,
       mcxUnitMultiplier(trade.exchange, trade.name)
     );
-    state.set(key, { quantity: result.quantity, avg_price: result.avg_price, realized_pnl: result.realized_pnl });
+
+    let entryChargePerUnit = 0;
+    let allocatedEntryCharges = 0;
+    let exitCharges = 0;
+
+    if (addingToPosition) {
+      // This trade's charges blend into the weighted-average entry cost of the (possibly
+      // larger) resulting position, same as avg_price blends in fillPrice.
+      const newQtyAbs = Math.abs(result.quantity);
+      entryChargePerUnit =
+        newQtyAbs > 0 ? (Math.abs(current.quantity) * current.entryChargePerUnit + trade.charges) / newQtyAbs : 0;
+    } else {
+      // Reduces (or flips through) the existing position: the closed portion releases its
+      // share of the entry-charge pool; this trade's own charges split between the exit
+      // portion and any newly-opened flip portion by quantity.
+      allocatedEntryCharges = result.closingQty * current.entryChargePerUnit;
+      const remainingTradeQty = trade.quantity - result.closingQty;
+      exitCharges = trade.quantity > 0 ? trade.charges * (result.closingQty / trade.quantity) : 0;
+      const flipCharges = trade.charges - exitCharges;
+      entryChargePerUnit = remainingTradeQty > 0 ? flipCharges / remainingTradeQty : 0;
+    }
+
+    state.set(key, {
+      quantity: result.quantity,
+      avg_price: result.avg_price,
+      realized_pnl: result.realized_pnl,
+      entryChargePerUnit,
+    });
 
     // Only trades that actually closed some existing exposure count as a P&L event — a pure
     // opening trade has real charges too, but no P&L yet, so it shouldn't show up here as
     // one. A closing trade at an unchanged price (zero gross P&L) still counts, since it
     // still cost real charges that shouldn't silently disappear.
     if (result.closingQty > 0) {
-      closedRows.push({
+      events.push({
         tradingsymbol: trade.tradingsymbol,
         exchange: trade.exchange,
         name: trade.name,
         instrument_type: trade.instrument_type,
+        lot_size: trade.lot_size,
         expiry: trade.expiry,
         strike: trade.strike,
         product: trade.product,
-        status: "closed",
-        executed_at: trade.executed_at,
         quantity: trade.quantity,
-        lot_size: trade.lot_size,
-        pnl: result.realized_pnl_delta,
-        charges: trade.charges,
-        net_pnl: result.realized_pnl_delta - trade.charges,
+        executed_at: trade.executed_at,
         margin_used: trade.margin_used,
+        grossPnl: result.realized_pnl_delta,
+        totalCharges: exitCharges + allocatedEntryCharges,
       });
     }
   }
 
-  // Open positions are shown on the Positions tab already — this list is exited trades only.
-  return closedRows.sort((a, b) => (b.executed_at ?? "").localeCompare(a.executed_at ?? ""));
-}
-
-export type PnlCalendarData = {
-  /** Net P&L (charges-inclusive) per calendar day, keyed "YYYY-MM-DD" in IST — the same
-   * timezone a day's trades actually happened in, regardless of server timezone. */
-  dailyNetPnl: Record<string, number>;
-  realisedPnl: number;
-  chargesAndTaxes: number;
-  netRealisedPnl: number;
-  unrealisedPnl: number;
-  firstTradeDate: string | null;
-  lastTradeDate: string | null;
-};
-
-// executed_at is stored as a UTC "YYYY-MM-DD HH:MM:SS" string — the same "+ Z" trick the
-// frontend already uses to parse it correctly, then rendered back out in IST so a trade just
-// before/after midnight lands on the calendar day it actually happened in for an Indian user.
-function toISTDate(utcDatetime: string): string {
-  return new Date(utcDatetime + "Z").toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  return { events };
 }
 
 /**
- * Mirrors Zerodha Console's P&L report summary: a day-by-day realized P&L heatmap plus the
- * Realised/Charges/Net realised/Unrealised totals. Unlike getPnlSummary (closing trades
- * only), chargesAndTaxes here sums every fill — opening trades pay real charges too, and a
- * true "total charges paid" figure needs to count them.
+ * Per-trade P&L, not per-symbol: if you round-tripped the same stock three times today,
+ * you get three separate rows (one per closing trade), each with its own realized P&L and
+ * the full round-trip charges it cost — not one number that hides how each individual trade
+ * actually went. Currently open positions get one row each for live unrealized P&L (nothing
+ * to split up yet since they haven't been closed).
  */
-export function getPnlCalendar(userId: number = config.defaultUserId): PnlCalendarData {
-  const trades = db
-    .prepare(
-      `SELECT th.tradingsymbol, th.exchange, th.product, th.transaction_type, th.quantity, th.price, th.charges, th.executed_at,
-              i.name
-       FROM trade_history th
-       LEFT JOIN instruments i ON i.instrument_token = th.instrument_token
-       WHERE th.user_id = ? ORDER BY th.executed_at ASC, th.id ASC`
-    )
-    .all(userId) as {
-    tradingsymbol: string;
-    exchange: string;
-    product: string;
-    transaction_type: "BUY" | "SELL";
-    quantity: number;
-    price: number;
-    charges: number;
-    executed_at: string;
-    name: string | null;
-  }[];
+export function getPnlSummary(userId: number = config.defaultUserId): PnlSummaryItem[] {
+  const { events } = replayClosedTrades(userId);
 
-  const state = new Map<string, { quantity: number; avg_price: number; realized_pnl: number }>();
-  const dailyNetPnl: Record<string, number> = {};
-  let realisedPnl = 0;
-  let chargesAndTaxes = 0;
+  const closedRows: PnlSummaryItem[] = events.map((e) => ({
+    tradingsymbol: e.tradingsymbol,
+    exchange: e.exchange,
+    name: e.name,
+    instrument_type: e.instrument_type,
+    expiry: e.expiry,
+    strike: e.strike,
+    product: e.product,
+    status: "closed",
+    executed_at: e.executed_at,
+    quantity: e.quantity,
+    lot_size: e.lot_size,
+    pnl: e.grossPnl,
+    charges: e.totalCharges,
+    net_pnl: e.grossPnl - e.totalCharges,
+    margin_used: e.margin_used,
+  }));
 
-  for (const trade of trades) {
-    chargesAndTaxes += trade.charges;
-
-    const key = `${trade.tradingsymbol}::${trade.product}`;
-    const current = state.get(key) ?? { quantity: 0, avg_price: 0, realized_pnl: 0 };
-    const result = applyFill(
-      current.quantity,
-      current.avg_price,
-      current.realized_pnl,
-      trade.transaction_type,
-      trade.quantity,
-      trade.price,
-      mcxUnitMultiplier(trade.exchange, trade.name)
-    );
-    state.set(key, { quantity: result.quantity, avg_price: result.avg_price, realized_pnl: result.realized_pnl });
-
-    if (result.closingQty > 0) {
-      realisedPnl += result.realized_pnl_delta;
-      const day = toISTDate(trade.executed_at);
-      const netForTrade = result.realized_pnl_delta - trade.charges;
-      dailyNetPnl[day] = (dailyNetPnl[day] ?? 0) + netForTrade;
-    }
-  }
-
-  const unrealisedPnl =
-    getPositions(userId).reduce((sum, p) => sum + p.unrealized_pnl, 0) +
-    getHoldings(userId).reduce((sum, h) => sum + h.unrealized_pnl, 0);
-
-  return {
-    dailyNetPnl,
-    realisedPnl,
-    chargesAndTaxes,
-    netRealisedPnl: realisedPnl - chargesAndTaxes,
-    unrealisedPnl,
-    firstTradeDate: trades.length > 0 ? toISTDate(trades[0].executed_at) : null,
-    lastTradeDate: trades.length > 0 ? toISTDate(trades[trades.length - 1].executed_at) : null,
-  };
+  // Open positions are shown on the Positions tab already — this list is exited trades only.
+  return closedRows.sort((a, b) => (b.executed_at ?? "").localeCompare(a.executed_at ?? ""));
 }
 
 export function getHoldingQuantity(instrumentToken: number, userId: number = config.defaultUserId): number {

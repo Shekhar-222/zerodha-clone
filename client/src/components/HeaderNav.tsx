@@ -1,6 +1,6 @@
 import { Bell, LogOut, Menu, ShoppingCart } from "lucide-react";
 
-export type Tab = "dashboard" | "chart" | "orders" | "holdings" | "positions" | "funds" | "history";
+export type Tab = "dashboard" | "chart" | "orders" | "holdings" | "positions" | "funds";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
@@ -9,7 +9,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "holdings", label: "Holdings" },
   { id: "positions", label: "Positions" },
   { id: "funds", label: "Funds" },
-  { id: "history", label: "History" },
 ];
 
 export function HeaderNav({

@@ -10,7 +10,6 @@ import { HoldingsTable } from "./components/HoldingsTable";
 import { OrdersTable } from "./components/OrdersTable";
 import { FundsBar } from "./components/FundsBar";
 import { PnlSummary } from "./components/PnlSummary";
-import { TradeHistoryTable } from "./components/TradeHistoryTable";
 import { EmptyState } from "./components/EmptyState";
 
 const TAB_TITLES: Record<Tab, string> = {
@@ -20,7 +19,6 @@ const TAB_TITLES: Record<Tab, string> = {
   holdings: "Holdings",
   positions: "Positions",
   funds: "Funds",
-  history: "Trade History",
 };
 
 export default function App() {
@@ -259,7 +257,6 @@ export default function App() {
                 </div>
               </div>
             )}
-            {tab === "history" && <TradeHistoryTable />}
           </div>
         </main>
       </div>

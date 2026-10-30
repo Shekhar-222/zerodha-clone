@@ -60,23 +60,6 @@ export type Order = {
   strike?: number | null;
 };
 
-export type TradeHistoryItem = {
-  id: number;
-  tradingsymbol: string;
-  exchange: string;
-  instrument_token: number;
-  transaction_type: "BUY" | "SELL";
-  order_type: "MARKET" | "LIMIT" | "SL" | "SL-M";
-  product: "MIS" | "CNC" | "NRML";
-  quantity: number;
-  price: number;
-  executed_at: string;
-  name?: string | null;
-  instrument_type?: "EQ" | "FUT" | "CE" | "PE" | null;
-  expiry?: string | null;
-  strike?: number | null;
-};
-
 export type Position = {
   id: number;
   tradingsymbol: string;
@@ -130,16 +113,6 @@ export type PnlSummaryItem = {
   charges: number;
   net_pnl: number;
   margin_used?: number | null;
-};
-
-export type PnlCalendarData = {
-  dailyNetPnl: Record<string, number>;
-  realisedPnl: number;
-  chargesAndTaxes: number;
-  netRealisedPnl: number;
-  unrealisedPnl: number;
-  firstTradeDate: string | null;
-  lastTradeDate: string | null;
 };
 
 export type Transaction = {
@@ -212,7 +185,6 @@ export const api = {
   getProfile: () => request<Profile>("/api/auth/profile"),
 
   getOrders: () => request<Order[]>("/api/orders"),
-  getTradeHistory: () => request<TradeHistoryItem[]>("/api/orders/history"),
   placeOrder: (input: {
     instrument_token: number;
     transaction_type: "BUY" | "SELL";
@@ -259,6 +231,5 @@ export const api = {
   getFunds: () => request<Funds>("/api/portfolio/funds"),
   getTransactions: () => request<Transaction[]>("/api/portfolio/transactions"),
   getPnlSummary: () => request<PnlSummaryItem[]>("/api/portfolio/pnl-summary"),
-  getPnlCalendar: () => request<PnlCalendarData>("/api/portfolio/pnl-calendar"),
   resetAccount: () => request<{ ok: boolean }>("/api/portfolio/reset", { method: "POST" }),
 };

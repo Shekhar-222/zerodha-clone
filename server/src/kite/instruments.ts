@@ -107,8 +107,12 @@ export function searchInstruments(query: string, limit = 20) {
   const exact = tokens.join("");
   const startsWith = `${tokens[0]}%`;
 
-  const whereClause = instrumentTypeFilter ? `(${conditions}) AND instrument_type = ?` : conditions;
-  const whereParams = instrumentTypeFilter ? [...params, instrumentTypeFilter] : params;
+  const baseClause = instrumentTypeFilter ? `(${conditions}) AND instrument_type = ?` : conditions;
+  const baseParams = instrumentTypeFilter ? [...params, instrumentTypeFilter] : params;
+  // Equities have no expiry at all (NULL) and are unaffected; a FUT/CE/PE contract whose
+  // expiry has already passed has nothing left to trade, so it shouldn't show up as a result.
+  const whereClause = `(${baseClause}) AND (expiry IS NULL OR expiry >= ?)`;
+  const whereParams = [...baseParams, todayIST()];
 
   return db
     .prepare(

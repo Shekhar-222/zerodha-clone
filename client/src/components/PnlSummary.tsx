@@ -85,8 +85,11 @@ function BookedSummary({ items }: { items: PnlSummaryItem[] }) {
   );
 }
 
+const PAGE_SIZE = 20;
+
 export function PnlSummary() {
   const [items, setItems] = useState<PnlSummaryItem[] | null>(null);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     api.getPnlSummary().then(setItems).catch(console.error);
@@ -99,6 +102,10 @@ export function PnlSummary() {
   if (items.length === 0) {
     return <div className="py-4 text-center text-sm text-gray-400">No profit or loss yet.</div>;
   }
+
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <div>
@@ -114,7 +121,7 @@ export function PnlSummary() {
         </div>
       </div>
       <div className="divide-y divide-gray-100">
-        {items.map((item, i) => (
+        {pageItems.map((item, i) => (
           <div key={i} className="flex items-center justify-between py-2 text-[15px]">
             <div>
               <ContractLabel item={item} className="text-gray-800" />
@@ -159,6 +166,34 @@ export function PnlSummary() {
           </div>
         ))}
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-3 text-sm">
+          <span className="text-xs text-gray-400">
+            Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, items.length)} of{" "}
+            {items.length}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="rounded border border-gray-200 px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <span className="text-xs text-gray-500">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="rounded border border-gray-200 px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -132,6 +132,16 @@ export type PnlSummaryItem = {
   margin_used?: number | null;
 };
 
+export type PnlCalendarData = {
+  dailyNetPnl: Record<string, number>;
+  realisedPnl: number;
+  chargesAndTaxes: number;
+  netRealisedPnl: number;
+  unrealisedPnl: number;
+  firstTradeDate: string | null;
+  lastTradeDate: string | null;
+};
+
 export type Transaction = {
   id: number;
   order_id: number | null;
@@ -249,5 +259,6 @@ export const api = {
   getFunds: () => request<Funds>("/api/portfolio/funds"),
   getTransactions: () => request<Transaction[]>("/api/portfolio/transactions"),
   getPnlSummary: () => request<PnlSummaryItem[]>("/api/portfolio/pnl-summary"),
+  getPnlCalendar: () => request<PnlCalendarData>("/api/portfolio/pnl-calendar"),
   resetAccount: () => request<{ ok: boolean }>("/api/portfolio/reset", { method: "POST" }),
 };

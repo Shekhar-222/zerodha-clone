@@ -340,6 +340,96 @@ export function getPnlSummary(userId: number = config.defaultUserId): PnlSummary
   return closedRows.sort((a, b) => (b.executed_at ?? "").localeCompare(a.executed_at ?? ""));
 }
 
+export type PnlCalendarData = {
+  /** Net P&L (charges-inclusive) per calendar day, keyed "YYYY-MM-DD" in IST — the same
+   * timezone a day's trades actually happened in, regardless of server timezone. */
+  dailyNetPnl: Record<string, number>;
+  realisedPnl: number;
+  chargesAndTaxes: number;
+  netRealisedPnl: number;
+  unrealisedPnl: number;
+  firstTradeDate: string | null;
+  lastTradeDate: string | null;
+};
+
+// executed_at is stored as a UTC "YYYY-MM-DD HH:MM:SS" string — the same "+ Z" trick the
+// frontend already uses to parse it correctly, then rendered back out in IST so a trade just
+// before/after midnight lands on the calendar day it actually happened in for an Indian user.
+function toISTDate(utcDatetime: string): string {
+  return new Date(utcDatetime + "Z").toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+/**
+ * Mirrors Zerodha Console's P&L report summary: a day-by-day realized P&L heatmap plus the
+ * Realised/Charges/Net realised/Unrealised totals. Unlike getPnlSummary (closing trades
+ * only), chargesAndTaxes here sums every fill — opening trades pay real charges too, and a
+ * true "total charges paid" figure needs to count them.
+ */
+export function getPnlCalendar(userId: number = config.defaultUserId): PnlCalendarData {
+  const trades = db
+    .prepare(
+      `SELECT th.tradingsymbol, th.exchange, th.product, th.transaction_type, th.quantity, th.price, th.charges, th.executed_at,
+              i.name
+       FROM trade_history th
+       LEFT JOIN instruments i ON i.instrument_token = th.instrument_token
+       WHERE th.user_id = ? ORDER BY th.executed_at ASC, th.id ASC`
+    )
+    .all(userId) as {
+    tradingsymbol: string;
+    exchange: string;
+    product: string;
+    transaction_type: "BUY" | "SELL";
+    quantity: number;
+    price: number;
+    charges: number;
+    executed_at: string;
+    name: string | null;
+  }[];
+
+  const state = new Map<string, { quantity: number; avg_price: number; realized_pnl: number }>();
+  const dailyNetPnl: Record<string, number> = {};
+  let realisedPnl = 0;
+  let chargesAndTaxes = 0;
+
+  for (const trade of trades) {
+    chargesAndTaxes += trade.charges;
+
+    const key = `${trade.tradingsymbol}::${trade.product}`;
+    const current = state.get(key) ?? { quantity: 0, avg_price: 0, realized_pnl: 0 };
+    const result = applyFill(
+      current.quantity,
+      current.avg_price,
+      current.realized_pnl,
+      trade.transaction_type,
+      trade.quantity,
+      trade.price,
+      mcxUnitMultiplier(trade.exchange, trade.name)
+    );
+    state.set(key, { quantity: result.quantity, avg_price: result.avg_price, realized_pnl: result.realized_pnl });
+
+    if (result.closingQty > 0) {
+      realisedPnl += result.realized_pnl_delta;
+      const day = toISTDate(trade.executed_at);
+      const netForTrade = result.realized_pnl_delta - trade.charges;
+      dailyNetPnl[day] = (dailyNetPnl[day] ?? 0) + netForTrade;
+    }
+  }
+
+  const unrealisedPnl =
+    getPositions(userId).reduce((sum, p) => sum + p.unrealized_pnl, 0) +
+    getHoldings(userId).reduce((sum, h) => sum + h.unrealized_pnl, 0);
+
+  return {
+    dailyNetPnl,
+    realisedPnl,
+    chargesAndTaxes,
+    netRealisedPnl: realisedPnl - chargesAndTaxes,
+    unrealisedPnl,
+    firstTradeDate: trades.length > 0 ? toISTDate(trades[0].executed_at) : null,
+    lastTradeDate: trades.length > 0 ? toISTDate(trades[trades.length - 1].executed_at) : null,
+  };
+}
+
 export function getHoldingQuantity(instrumentToken: number, userId: number = config.defaultUserId): number {
   const row = db
     .prepare("SELECT quantity FROM holdings WHERE user_id = ? AND instrument_token = ?")

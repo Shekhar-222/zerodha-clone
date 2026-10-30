@@ -23,6 +23,12 @@ export type Instrument = {
   lot_size?: number;
 };
 
+export type WatchlistGroup = {
+  id: number;
+  name: string;
+  sort_order: number;
+};
+
 export type WatchlistItem = {
   id: number;
   tradingsymbol: string;
@@ -173,9 +179,19 @@ export const api = {
   searchInstruments: (q: string) =>
     request<Instrument[]>(`/api/instruments/search?q=${encodeURIComponent(q)}`),
 
-  getWatchlist: () => request<WatchlistItem[]>("/api/watchlist"),
-  addToWatchlist: (instrument_token: number) =>
-    request("/api/watchlist", { method: "POST", body: JSON.stringify({ instrument_token }) }),
+  getWatchlistGroups: () => request<WatchlistGroup[]>("/api/watchlist/groups"),
+  createWatchlistGroup: (name?: string) =>
+    request<WatchlistGroup>("/api/watchlist/groups", { method: "POST", body: JSON.stringify({ name }) }),
+  renameWatchlistGroup: (id: number, name: string) =>
+    request(`/api/watchlist/groups/${id}`, { method: "PUT", body: JSON.stringify({ name }) }),
+  deleteWatchlistGroup: (id: number) => request(`/api/watchlist/groups/${id}`, { method: "DELETE" }),
+
+  getWatchlist: (groupId: number) => request<WatchlistItem[]>(`/api/watchlist?group_id=${groupId}`),
+  addToWatchlist: (instrument_token: number, groupId: number) =>
+    request("/api/watchlist", {
+      method: "POST",
+      body: JSON.stringify({ instrument_token, group_id: groupId }),
+    }),
   removeFromWatchlist: (id: number) => request(`/api/watchlist/${id}`, { method: "DELETE" }),
   reorderWatchlist: (ids: number[]) =>
     request("/api/watchlist/reorder", { method: "PUT", body: JSON.stringify({ ids }) }),

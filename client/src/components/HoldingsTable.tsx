@@ -81,7 +81,7 @@ export function HoldingsTable({
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap gap-x-10 gap-y-3 border-b border-gray-100 pb-4 text-sm">
+      <div className="mb-4 flex flex-wrap gap-x-16 gap-y-3 border-b border-gray-100 pb-4 text-sm">
         <div>
           <div className="text-lg font-semibold text-gray-800">₹{inr(totalInvested)}</div>
           <div className="text-xs text-gray-500">Total investment</div>
@@ -171,7 +171,7 @@ export function HoldingsTable({
                 <td className="py-2.5 text-right opacity-0 transition-opacity group-hover:opacity-100">
                   <button
                     onClick={() => setExiting(h)}
-                    className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                    className="rounded bg-loss px-2 py-1 text-xs font-medium text-white hover:bg-red-600"
                   >
                     Exit
                   </button>

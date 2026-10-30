@@ -7,13 +7,16 @@ import {
   ChevronUp,
   GripVertical,
   Link2,
+  Pencil,
+  Plus,
   Search,
   Trash2,
   X,
 } from "lucide-react";
-import { api, Instrument, WatchlistItem } from "../api";
+import { api, Instrument, WatchlistGroup, WatchlistItem } from "../api";
 import { OrderWindow } from "./OrderWindow";
 import { OptionChain } from "./OptionChain";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { ContractLabel } from "./ContractLabel";
 import { formatContractLabel } from "../formatContract";
 
@@ -69,8 +72,32 @@ export function Watchlist({
   const inputRef = searchInputRef ?? internalSearchRef;
   const searchBoxRef = useRef<HTMLDivElement>(null);
 
+  // Multiple named watchlists (Zerodha-style numbered tabs) — everything below (search-add,
+  // the item list, drag reorder) operates on whichever group is currently active.
+  const [groups, setGroups] = useState<WatchlistGroup[]>([]);
+  const [activeGroupId, setActiveGroupId] = useState<number | null>(null);
+  const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [deletingGroupId, setDeletingGroupId] = useState<number | null>(null);
+  const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null;
+
+  function refreshGroups() {
+    api
+      .getWatchlistGroups()
+      .then((gs) => {
+        setGroups(gs);
+        setActiveGroupId((prev) => (prev !== null && gs.some((g) => g.id === prev) ? prev : (gs[0]?.id ?? null)));
+      })
+      .catch(console.error);
+  }
+
+  useEffect(() => {
+    refreshGroups();
+  }, []);
+
   function refresh() {
-    api.getWatchlist().then((rows) => {
+    if (activeGroupId === null) return;
+    api.getWatchlist(activeGroupId).then((rows) => {
       setItems(rows);
       if (rows.length > 0) {
         api
@@ -94,10 +121,50 @@ export function Watchlist({
   }
 
   useEffect(() => {
+    if (activeGroupId === null) return;
     refresh();
     const interval = setInterval(refresh, 30000);
     return () => clearInterval(interval);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGroupId]);
+
+  async function createGroup() {
+    const g = await api.createWatchlistGroup();
+    setGroups((prev) => [...prev, g]);
+    setActiveGroupId(g.id);
+  }
+
+  function startRename(g: WatchlistGroup) {
+    setEditingGroupId(g.id);
+    setEditingName(g.name);
+  }
+
+  async function commitRename() {
+    if (editingGroupId === null) return;
+    const name = editingName.trim();
+    const id = editingGroupId;
+    setEditingGroupId(null);
+    if (!name) return;
+    await api.renameWatchlistGroup(id, name);
+    setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, name } : g)));
+  }
+
+  function requestDeleteGroup(id: number) {
+    if (groups.length <= 1) return;
+    setDeletingGroupId(id);
+  }
+
+  async function confirmDeleteGroup() {
+    const id = deletingGroupId;
+    setDeletingGroupId(null);
+    if (id === null) return;
+    await api.deleteWatchlistGroup(id);
+    setGroups((prev) => {
+      const next = prev.filter((g) => g.id !== id);
+      setActiveGroupId((current) => (current === id ? next[0]?.id ?? null : current));
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (query.trim().length < 1) {
@@ -134,11 +201,11 @@ export function Watchlist({
   }
 
   async function addSelected() {
-    if (selectedResults.size === 0) return;
+    if (selectedResults.size === 0 || activeGroupId === null) return;
     setAdding(true);
     try {
       await Promise.all(
-        Array.from(selectedResults.values()).map((i) => api.addToWatchlist(i.instrument_token))
+        Array.from(selectedResults.values()).map((i) => api.addToWatchlist(i.instrument_token, activeGroupId))
       );
       setQuery("");
       setResults([]);
@@ -150,7 +217,8 @@ export function Watchlist({
   }
 
   async function addSingle(instrument: Instrument) {
-    await api.addToWatchlist(instrument.instrument_token);
+    if (activeGroupId === null) return;
+    await api.addToWatchlist(instrument.instrument_token, activeGroupId);
     setQuery("");
     setResults([]);
     setSelectedResults(new Map());
@@ -288,9 +356,46 @@ export function Watchlist({
       </div>
 
       <div className="flex items-center justify-between px-3 py-2 text-xs text-gray-500">
-        <span>
-          Stocks ({items.length}/{MAX_STOCKS})
-        </span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          {editingGroupId === activeGroup?.id ? (
+            <input
+              autoFocus
+              value={editingName}
+              onChange={(e) => setEditingName(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename();
+                if (e.key === "Escape") setEditingGroupId(null);
+              }}
+              className="w-28 rounded border border-accent px-1 py-0.5 text-xs text-gray-800 focus:outline-none"
+            />
+          ) : (
+            <>
+              <span className="truncate font-medium text-gray-700">{activeGroup?.name ?? "Watchlist"}</span>
+              <span className="shrink-0">
+                ({items.length}/{MAX_STOCKS})
+              </span>
+              {activeGroup && (
+                <button
+                  onClick={() => startRename(activeGroup)}
+                  className="shrink-0 text-gray-300 hover:text-gray-600"
+                  title="Rename watchlist"
+                >
+                  <Pencil size={11} />
+                </button>
+              )}
+              {groups.length > 1 && activeGroupId !== null && (
+                <button
+                  onClick={() => requestDeleteGroup(activeGroupId)}
+                  className="shrink-0 text-gray-300 hover:text-loss"
+                  title="Delete watchlist"
+                >
+                  <Trash2 size={11} />
+                </button>
+              )}
+            </>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() =>
@@ -403,6 +508,51 @@ export function Watchlist({
         )}
       </div>
 
+      <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto px-2 py-1.5 pt-2.5 border-t border-gray-100">
+        {groups.map((g, i) => (
+          <div key={g.id} className="group/tab relative shrink-0">
+            <button
+              onClick={() => setActiveGroupId(g.id)}
+              title={g.name}
+              className={`flex h-6 w-6 items-center justify-center rounded text-xs font-medium ${
+                g.id === activeGroupId ? "bg-accent text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+              }`}
+            >
+              {i + 1}
+            </button>
+            {groups.length > 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestDeleteGroup(g.id);
+                }}
+                title={`Delete "${g.name}"`}
+                className="absolute -right-1.5 -top-1.5 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-loss text-white hover:bg-red-600 group-hover/tab:flex"
+              >
+                <X size={9} strokeWidth={3} />
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          onClick={createGroup}
+          title="New watchlist"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+
+      {deletingGroupId !== null && (
+        <ConfirmDialog
+          title="Delete watchlist"
+          message={`Delete "${groups.find((g) => g.id === deletingGroupId)?.name ?? "this watchlist"}" and everything in it? This can't be undone.`}
+          confirmLabel="Delete"
+          onConfirm={confirmDeleteGroup}
+          onCancel={() => setDeletingGroupId(null)}
+        />
+      )}
+
       {order && (
         <OrderWindow
           instrument={order.instrument}
@@ -413,10 +563,11 @@ export function Watchlist({
         />
       )}
 
-      {chainFor && (
+      {chainFor && activeGroupId !== null && (
         <OptionChain
           underlying={chainFor.instrument}
           spotLtp={chainFor.ltp}
+          activeGroupId={activeGroupId}
           onClose={() => setChainFor(null)}
           onOrderPlaced={onOrderPlaced}
           onWatchlistChanged={refresh}

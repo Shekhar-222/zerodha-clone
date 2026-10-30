@@ -227,6 +227,64 @@ function migrate() {
     db.pragma("foreign_keys = ON");
   }
 
+  // Patch up databases created before multiple watchlists (group_id column + the
+  // per-group UNIQUE constraint, replacing the old per-user-only one).
+  const watchlistCols = (db.prepare("PRAGMA table_info(watchlist)").all() as { name: string }[]).map(
+    (c) => c.name
+  );
+  if (watchlistCols.length > 0 && !watchlistCols.includes("group_id")) {
+    const owners = db.prepare("SELECT DISTINCT user_id FROM watchlist").all() as { user_id: number }[];
+    const defaultGroupId = new Map<number, number>();
+    for (const { user_id } of owners) {
+      const groupId = db
+        .prepare("INSERT INTO watchlist_groups (user_id, name, sort_order) VALUES (?, 'Watchlist 1', 0)")
+        .run(user_id).lastInsertRowid as number;
+      defaultGroupId.set(user_id, groupId);
+    }
+
+    db.pragma("foreign_keys = OFF");
+    db.pragma("legacy_alter_table = ON");
+    db.exec(`
+      ALTER TABLE watchlist RENAME TO watchlist_old;
+      CREATE TABLE watchlist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        group_id INTEGER NOT NULL REFERENCES watchlist_groups(id),
+        tradingsymbol TEXT NOT NULL,
+        exchange TEXT NOT NULL,
+        instrument_token INTEGER NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(user_id, group_id, instrument_token)
+      );
+    `);
+    const insertMoved = db.prepare(
+      `INSERT INTO watchlist (id, user_id, group_id, tradingsymbol, exchange, instrument_token, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    const oldRows = db.prepare("SELECT * FROM watchlist_old").all() as {
+      id: number;
+      user_id: number;
+      tradingsymbol: string;
+      exchange: string;
+      instrument_token: number;
+      sort_order: number;
+    }[];
+    for (const row of oldRows) {
+      insertMoved.run(
+        row.id,
+        row.user_id,
+        defaultGroupId.get(row.user_id)!,
+        row.tradingsymbol,
+        row.exchange,
+        row.instrument_token,
+        row.sort_order
+      );
+    }
+    db.exec("DROP TABLE watchlist_old;");
+    db.pragma("legacy_alter_table = OFF");
+    db.pragma("foreign_keys = ON");
+  }
+
   // Repair fallout from earlier migrations that ran before legacy_alter_table was known to
   // matter here: foreign_keys=OFF alone does not stop SQLite from rewriting *other* tables'
   // REFERENCES clauses to the renamed orders_old on an ALTER TABLE RENAME — only
@@ -303,9 +361,26 @@ function seed() {
   }
 }
 
+// Runs after both migrate() and seed(), so it catches every user needing a first watchlist
+// group: a brand new install (user just seeded), an existing user whose watchlist happened to
+// be empty when the group_id migration ran (so it had nothing to backfill from), or anyone
+// else who's somehow ended up without one.
+function ensureWatchlistGroups() {
+  const usersWithoutGroups = db
+    .prepare(
+      `SELECT u.id FROM users u
+       WHERE NOT EXISTS (SELECT 1 FROM watchlist_groups g WHERE g.user_id = u.id)`
+    )
+    .all() as { id: number }[];
+  for (const { id } of usersWithoutGroups) {
+    db.prepare("INSERT INTO watchlist_groups (user_id, name, sort_order) VALUES (?, 'Watchlist 1', 0)").run(id);
+  }
+}
+
 export function initDb() {
   migrate();
   seed();
+  ensureWatchlistGroups();
 }
 
 // Every instrument the app needs live prices for — used to resubscribe the Kite ticker

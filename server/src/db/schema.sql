@@ -38,14 +38,25 @@ CREATE TABLE IF NOT EXISTS instruments (
 );
 CREATE INDEX IF NOT EXISTS idx_instruments_symbol ON instruments(tradingsymbol);
 
+-- Multiple named watchlists per user (Zerodha-style numbered tabs) — a group must exist
+-- before any watchlist row can reference it, so this table comes first.
+CREATE TABLE IF NOT EXISTS watchlist_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS watchlist (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id),
+  group_id INTEGER NOT NULL REFERENCES watchlist_groups(id),
   tradingsymbol TEXT NOT NULL,
   exchange TEXT NOT NULL,
   instrument_token INTEGER NOT NULL,
   sort_order INTEGER NOT NULL DEFAULT 0,
-  UNIQUE(user_id, instrument_token)
+  -- Same instrument can sit in more than one group, just not twice within the same one.
+  UNIQUE(user_id, group_id, instrument_token)
 );
 
 CREATE TABLE IF NOT EXISTS orders (

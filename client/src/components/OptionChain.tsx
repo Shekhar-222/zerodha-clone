@@ -105,12 +105,14 @@ function LegCell({
 export function OptionChain({
   underlying,
   spotLtp,
+  activeGroupId,
   onClose,
   onOrderPlaced,
   onWatchlistChanged,
 }: {
   underlying: Instrument;
   spotLtp?: number;
+  activeGroupId: number;
   onClose: () => void;
   onOrderPlaced: () => void;
   onWatchlistChanged: () => void;
@@ -149,11 +151,11 @@ export function OptionChain({
       });
 
     api
-      .getWatchlist()
+      .getWatchlist(activeGroupId)
       .then((rows) => setWatched(new Set(rows.map((r) => r.instrument_token))))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [underlyingKey]);
+  }, [underlyingKey, activeGroupId]);
 
   function loadQuotes(tokens: number[]) {
     const batches: number[][] = [];
@@ -187,7 +189,7 @@ export function OptionChain({
   }, [expiry, chain]);
 
   async function addToWatchlist(token: number) {
-    await api.addToWatchlist(token);
+    await api.addToWatchlist(token, activeGroupId);
     setWatched((prev) => new Set(prev).add(token));
     onWatchlistChanged();
   }

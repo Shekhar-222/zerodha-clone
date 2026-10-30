@@ -88,6 +88,8 @@ export type Holding = {
   avg_price: number;
   ltp: number;
   unrealized_pnl: number;
+  instrument_type?: "EQ" | null;
+  lot_size?: number | null;
 };
 
 export type Funds = {

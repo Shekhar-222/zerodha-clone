@@ -40,10 +40,12 @@ export type HoldingRow = {
 export function getPositions(userId: number = config.defaultUserId) {
   const rows = db
     .prepare(
+      // CNC (delivery) fills are mirrored into `holdings` too — shown there only, not here,
+      // so a delivery buy doesn't appear as both a "position" and a "holding" at once.
       `SELECT p.*, i.name, i.instrument_type, i.lot_size, i.expiry, i.strike
        FROM positions p
        LEFT JOIN instruments i ON i.instrument_token = p.instrument_token
-       WHERE p.user_id = ? AND p.quantity != 0
+       WHERE p.user_id = ? AND p.quantity != 0 AND p.product != 'CNC'
        ORDER BY COALESCE(p.opened_at, p.updated_at) ASC, p.id ASC`
     )
     .all(userId) as PositionRow[];

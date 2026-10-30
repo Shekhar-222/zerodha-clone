@@ -73,7 +73,7 @@ function BookedSummary({ items }: { items: PnlSummaryItem[] }) {
           </div>
           <div className="text-center">
             <div className="text-lg font-semibold text-gain">{winningTrades}</div>
-            <div className="text-xs text-gray-500">Winning trades</div>
+            <div className="text-xs text-gray-500">Profitable trades</div>
           </div>
           <div className="text-center">
             <div className="text-lg font-semibold text-loss">{losingTrades}</div>

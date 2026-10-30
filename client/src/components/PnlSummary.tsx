@@ -21,6 +21,14 @@ function formatMoney(n: number): string {
   return `${n >= 0 ? "+" : "-"}₹${Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+// Same basis as the Positions tab's P&L% — net P&L against the margin that trade actually
+// tied up. Equity has no margin concept (margin_used is null there, same as the column
+// itself), so there's nothing meaningful to divide by.
+function pnlPct(item: PnlSummaryItem): number | null {
+  if (item.margin_used == null || item.margin_used === 0) return null;
+  return (item.net_pnl / item.margin_used) * 100;
+}
+
 /** Closed trades only — a still-open position hasn't actually booked anything yet, so it
  * shouldn't count toward "booked" profit/loss. Uses net_pnl (after real trading charges),
  * the same figure the "Incl. charges" column already shows per row. */
@@ -30,8 +38,13 @@ function BookedSummary({ items }: { items: PnlSummaryItem[] }) {
   const totalLoss = closed.filter((i) => i.net_pnl < 0).reduce((sum, i) => sum + i.net_pnl, 0);
   const netPnl = totalProfit + totalLoss;
 
+  const totalTrades = closed.length;
+  const winningTrades = closed.filter((i) => i.net_pnl > 0).length;
+  const losingTrades = closed.filter((i) => i.net_pnl < 0).length;
+  const winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : null;
+
   return (
-    <div className="mb-4 grid grid-cols-1 gap-3 border-b border-gray-100 pb-4 sm:grid-cols-3">
+    <div className="mb-4 grid grid-cols-1 gap-3 border-b border-gray-100 pb-4 sm:grid-cols-4">
       <div className="rounded border border-gray-100 p-4 text-center">
         <div className="text-2xl font-semibold text-gain">{formatMoney(totalProfit)}</div>
         <div className="text-xs text-gray-500">Total profit booked</div>
@@ -45,6 +58,28 @@ function BookedSummary({ items }: { items: PnlSummaryItem[] }) {
           {formatMoney(netPnl)}
         </div>
         <div className="text-xs text-gray-500">Net P&amp;L</div>
+      </div>
+      <div className="rounded border border-gray-100 p-4">
+        <div className="grid grid-cols-2 gap-y-2">
+          <div className="text-center">
+            <div className="text-lg font-semibold text-gray-800">{totalTrades}</div>
+            <div className="text-xs text-gray-500">Total trades</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-semibold text-gray-800">
+              {winRate === null ? "—" : `${winRate.toFixed(1)}%`}
+            </div>
+            <div className="text-xs text-gray-500">Win rate</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-semibold text-gain">{winningTrades}</div>
+            <div className="text-xs text-gray-500">Winning trades</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-semibold text-loss">{losingTrades}</div>
+            <div className="text-xs text-gray-500">Losing trades</div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -74,6 +109,7 @@ export function PnlSummary() {
         <div className="flex gap-6">
           <span className="w-20 whitespace-nowrap text-right">P&amp;L</span>
           <span className="w-24 whitespace-nowrap text-right">Incl. charges</span>
+          <span className="w-20 whitespace-nowrap text-right">P&amp;L %</span>
           <span className="w-24 whitespace-nowrap text-right">Margin used</span>
         </div>
       </div>
@@ -102,6 +138,18 @@ export function PnlSummary() {
                 {item.net_pnl >= 0 ? "+" : ""}
                 {item.net_pnl.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
               </span>
+              {(() => {
+                const pct = pnlPct(item);
+                return (
+                  <span
+                    className={`w-20 text-right tabular-nums ${
+                      pct === null ? "text-gray-400" : pct >= 0 ? "text-gain" : "text-loss"
+                    }`}
+                  >
+                    {pct === null ? "—" : `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`}
+                  </span>
+                );
+              })()}
               <span className="w-24 text-right tabular-nums text-gray-500">
                 {item.margin_used != null
                   ? `₹${item.margin_used.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
